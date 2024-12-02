@@ -452,18 +452,7 @@ class DocumentAnalyzerGUI:
             print(f"Original message: {message}")
 
     def setup_ui(self) -> None:
-        """
-        Setup the main user interface.
-        Creates and configures all UI components in the following order:
-        1. Main frame with padding
-        2. Analysis settings section
-        3. File count display
-        4. Analysis configuration
-        5. Output configuration
-        6. Progress section
-        7. Log section
-        8. Control buttons
-        """
+        """Setup the main user interface"""
         # Create main frame with padding
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -530,10 +519,7 @@ class DocumentAnalyzerGUI:
         current_row += 1
 
         # Control buttons at bottom
-        self.setup_control_buttons(current_row)
-
-        # Configure initial window geometry
-        self.setup_window_geometry()
+        self.setup_control_buttons(self.main_frame, current_row)
 
     def setup_window_geometry(self) -> None:
         """Configure initial window size and position"""
@@ -553,15 +539,21 @@ class DocumentAnalyzerGUI:
         self.root.geometry(f"{initial_width}x{initial_height}+{center_x}+{top_y}")
         self.root.minsize(600, 680)
 
-    def setup_control_buttons(self, row: int) -> None:
+    def setup_control_buttons(self, parent: ttk.Frame, row: int) -> None:
         """
         Setup control buttons (Start Analysis, Pause, Stop)
 
         Args:
+            parent: Parent frame to contain the buttons
             row: Grid row for button placement
         """
-        button_frame = ttk.Frame(self.main_frame)
-        button_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=10)
+        button_frame = ttk.Frame(parent)
+        button_frame.grid(
+            row=row,
+            column=0,
+            sticky=(tk.W, tk.E),
+            pady=(0, 10)  # Add padding at bottom
+        )
 
         # Start Analysis button
         self.analyze_btn = ttk.Button(
@@ -588,6 +580,17 @@ class DocumentAnalyzerGUI:
             state=tk.DISABLED
         )
         self.stop_btn.grid(row=0, column=2, padx=5)
+
+        # Help button with extra padding on left to separate it
+        help_btn = self.create_help_button(
+            button_frame,
+            "Controls:\n\n"
+            "• Start Analysis: Begin processing files\n"
+            "• Pause: Temporarily suspend processing\n"
+            "• Stop: Cancel the current analysis\n\n"
+            "Note: Analysis can be restarted after stopping."
+        )
+        help_btn.grid(row=0, column=3, padx=(15, 5))
 
     def create_main_frame(self) -> ttk.Frame:
         """Create and configure the main application frame"""
@@ -726,7 +729,6 @@ class DocumentAnalyzerGUI:
 
     def setup_file_selection(self, parent: ttk.Frame) -> None:
         """Setup file selection controls"""
-        # Create main frame for file selection
         file_frame = ttk.Frame(parent)
         file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
@@ -1044,52 +1046,6 @@ class DocumentAnalyzerGUI:
 
         # Configure grid weights
         log_frame.columnconfigure(0, weight=1)
-
-    def setup_control_buttons(self, parent: ttk.Frame) -> None:
-        """Setup control buttons (Start Analysis, Pause, Stop)"""
-        button_frame = ttk.Frame(parent)
-        button_frame.grid(
-            row=0, column=0,
-            sticky=(tk.W, tk.E),
-            pady=(0, 5)  # Less padding at top, normal at bottom
-        )
-
-        # Start Analysis button
-        self.analyze_btn = ttk.Button(
-            button_frame,
-            text="Start Analysis",
-            command=self.start_analysis
-        )
-        self.analyze_btn.grid(row=0, column=0, padx=5)
-
-        # Pause button (disabled by default)
-        self.pause_btn = ttk.Button(
-            button_frame,
-            text="Pause",
-            command=self.toggle_pause,
-            state=tk.DISABLED
-        )
-        self.pause_btn.grid(row=0, column=1, padx=5)
-
-        # Stop button (disabled by default)
-        self.stop_btn = ttk.Button(
-            button_frame,
-            text="Stop",
-            command=self.stop_analysis,
-            state=tk.DISABLED
-        )
-        self.stop_btn.grid(row=0, column=2, padx=5)
-
-        # Help button
-        help_btn = self.create_help_button(
-            button_frame,
-            "Controls:\n\n"
-            "• Start Analysis: Begin processing files\n"
-            "• Pause: Temporarily suspend processing\n"
-            "• Stop: Cancel the current analysis\n\n"
-            "Note: Analysis can be restarted after stopping."
-        )
-        help_btn.grid(row=0, column=3, padx=(15, 5))  # Extra padding on left
 
     def process_files(self) -> None:
         """Main method for processing all selected files"""
@@ -1441,7 +1397,7 @@ class DocumentAnalyzerGUI:
         ext = os.path.splitext(file_path.lower())[1]
         if ext == '.pdf':
             return "PDF"
-        elif ext in self.supported_formats:
+        elif ext in self.SUPPORTED_FORMATS:
             return "Image"
         return "Unknown"
 
@@ -1450,15 +1406,18 @@ class DocumentAnalyzerGUI:
         try:
             # Use provided path or current folder entry
             path_to_check = folder_path or self.folder_entry.get()
-
-            # No folder selected case
             if not path_to_check:
-                self._update_count_display("No folder selected", 'gray', 0)
+                self.file_count_var.set("No folder selected")
+                self.file_count_label.configure(foreground='gray')
+                if hasattr(self, 'settings'):
+                    self.settings = replace(self.settings, total_files=0)
                 return 0
 
-            # Invalid folder case
             if not os.path.exists(path_to_check):
-                self._update_count_display("Selected folder not found", 'red', 0)
+                self.file_count_var.set("Selected folder not found")
+                self.file_count_label.configure(foreground='red')
+                if hasattr(self, 'settings'):
+                    self.settings = replace(self.settings, total_files=0)
                 return 0
 
             # Count files based on current settings
@@ -1466,7 +1425,7 @@ class DocumentAnalyzerGUI:
                 path_to_check,
                 self.include_pdfs.get(),
                 self.include_images.get(),
-                self.SUPPORTED_FORMATS
+                self.SUPPORTED_FORMATS  # Changed from self.supported_formats
             )
 
             total_files = len(files)
@@ -1709,7 +1668,7 @@ class DocumentAnalyzerGUI:
                 folder_path,
                 self.include_pdfs.get(),
                 self.include_images.get(),
-                self.supported_formats
+                self.SUPPORTED_FORMATS
             )
             total_files = len(files)
 

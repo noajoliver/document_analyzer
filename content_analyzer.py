@@ -29,7 +29,7 @@ class MarginMeasurements:
     @property
     def normalized_threshold(self) -> float:
         """Get threshold as decimal"""
-        return self.threshold / 100.0
+        return self.threshold  # Remove the /100.0 since threshold is already a percentage
 
 
 @dataclass
@@ -97,23 +97,26 @@ class ContentAnalyzer:
         # Analyze top margin
         top_margin = img_array[:measurements.margin_pixels, :]
         top_pixels = np.sum(top_margin < 250)  # Less than 250 indicates non-white
-        top_percentage = top_pixels / (measurements.width * measurements.margin_pixels)
+        top_percentage = (top_pixels / (
+                    measurements.width * measurements.margin_pixels)) * 100  # Convert to percentage immediately
 
         # Analyze bottom margin
         bottom_margin = img_array[-measurements.margin_pixels:, :]
         bottom_pixels = np.sum(bottom_margin < 250)
-        bottom_percentage = bottom_pixels / (measurements.width * measurements.margin_pixels)
+        bottom_percentage = (bottom_pixels / (
+                    measurements.width * measurements.margin_pixels)) * 100  # Convert to percentage immediately
 
         # Calculate total affected area
         total_margin_pixels = 2 * measurements.width * measurements.margin_pixels
-        total_percentage = (top_pixels + bottom_pixels) / total_margin_pixels
+        total_percentage = ((
+                                        top_pixels + bottom_pixels) / total_margin_pixels) * 100  # Convert to percentage immediately
 
         return MarginAnalysisResult(
-            has_top_content=top_percentage > measurements.normalized_threshold,
-            has_bottom_content=bottom_percentage > measurements.normalized_threshold,
-            top_content_percentage=top_percentage * 100,
-            bottom_content_percentage=bottom_percentage * 100,
-            total_content_percentage=total_percentage * 100
+            has_top_content=top_percentage > measurements.threshold,  # Compare percentages directly
+            has_bottom_content=bottom_percentage > measurements.threshold,  # Compare percentages directly
+            top_content_percentage=top_percentage,  # Already in percentage form
+            bottom_content_percentage=bottom_percentage,  # Already in percentage form
+            total_content_percentage=total_percentage  # Already in percentage form
         )
 
     def analyze_text_blocks(self, page: fitz.Page) -> MarginAnalysisResult:
@@ -260,24 +263,52 @@ class PageAnalyzer:
             image_path: Path to image file
 
         Returns:
-            Dictionary containing analysis results
+            Dict containing analysis results
         """
-        with Image.open(image_path) as image:
-            image = image.convert('RGB')
-            analysis = self.content_analyzer.analyze_image_content(image)
+        try:
+            with Image.open(image_path) as image:
+                image = image.convert('RGB')
+                analysis = self.content_analyzer.analyze_image_content(image)
 
+                # Check content against threshold
+                has_content = (
+                        analysis.top_content_percentage > self.settings.threshold or
+                        analysis.bottom_content_percentage > self.settings.threshold
+                )
+
+                # Build location string if content is found
+                locations = []
+                if analysis.top_content_percentage > self.settings.threshold:
+                    locations.append("header")
+                if analysis.bottom_content_percentage > self.settings.threshold:
+                    locations.append("footer")
+
+                content_status = (
+                    f"Content found in {' and '.join(locations)}" if locations
+                    else "All content within margins"
+                )
+
+                return {
+                    "File": os.path.basename(image_path),
+                    "Page": 1,
+                    "Content Status": content_status,
+                    "Type": "Image",
+                    "Analysis Details": {
+                        "Top Content": f"{analysis.top_content_percentage:.1f}%",
+                        "Bottom Content": f"{analysis.bottom_content_percentage:.1f}%",
+                        "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
+                    }
+                }
+
+        except Exception as e:
             return {
                 "File": os.path.basename(image_path),
                 "Page": 1,
-                "Content Status": "Content found in header or footer" if
-                (analysis.has_top_content or analysis.has_bottom_content)
-                else "All content within margins",
+                "Content Status": "Processing Failed",
                 "Type": "Image",
-                "Analysis Details": {
-                    "Top Content": f"{analysis.top_content_percentage:.1f}%",
-                    "Bottom Content": f"{analysis.bottom_content_percentage:.1f}%",
-                    "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
-                }
+                "Analysis Details": {},
+                "Error": str(e),
+                "Error Severity": "ERROR"
             }
 
     def _format_status_message(self, analysis: MarginAnalysisResult) -> str:
