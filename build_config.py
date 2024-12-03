@@ -13,7 +13,8 @@ def download_poppler():
 
     if platform.system() == "Windows":
         # Download Poppler for Windows
-        poppler_url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v23.08.0-0/Release-23.08.0-0.zip"
+        poppler_url = \
+            "https://github.com/oschwartz10612/poppler-windows/releases/download/v23.08.0-0/Release-23.08.0-0.zip"
         poppler_dir = "poppler-windows"
 
         if not os.path.exists(poppler_dir):

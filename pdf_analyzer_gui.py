@@ -8,8 +8,8 @@ import logging
 from threading import Thread, Event, Lock
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass, replace
+from typing import List, Dict, Any, Optional, Tuple, Set, Union
+from dataclasses import dataclass, field, replace
 from functools import partial
 
 # GUI imports
@@ -44,6 +44,8 @@ class AnalysisSettings:
     total_files: Optional[int] = None
     include_pdfs: bool = True
     include_images: bool = True
+    process_subdirectories: bool = True  # Added this option
+    excluded_folders: Set[str] = field(default_factory=lambda: {'$RECYCLE.BIN', 'System Volume Information'})
 
     def __post_init__(self):
         """Validate settings after initialization"""
@@ -460,7 +462,7 @@ class DocumentAnalyzerGUI:
             print(f"Original message: {message}")
 
     def setup_ui(self) -> None:
-        """Setup the main user interface"""
+        """Set up the main user interface"""
         # Create main frame with padding
         self.main_frame = ttk.Frame(self.root, padding="10")
         self.main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
@@ -719,7 +721,7 @@ class DocumentAnalyzerGUI:
         type_frame.columnconfigure(0, weight=1)
 
     def setup_settings_section(self, parent: ttk.Frame) -> None:
-        """Setup the settings section of the UI"""
+        """Set up the settings section of the UI"""
         # Create frame with padding
         settings_frame = ttk.LabelFrame(parent, text="Analysis Settings", padding="5")
         settings_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
@@ -810,7 +812,7 @@ class DocumentAnalyzerGUI:
         checkbox_frame.columnconfigure(1, weight=1)
 
     def setup_file_count_section(self, parent: ttk.Frame) -> None:
-        """Setup the file count display section"""
+        """Set up the file count display section"""
         count_frame = ttk.Frame(parent)
         count_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
@@ -1057,22 +1059,76 @@ class DocumentAnalyzerGUI:
 
     def process_files(self) -> None:
         """Main method for processing all selected files"""
+        original_working_dir = os.getcwd()  # Store original working directory
+
         try:
             # Initialize processing state
             self.initialize_processing()
 
-            # Get file list with optional sampling
-            files_to_process = self.prepare_file_list()
+            # Create processing options
+            options = FileProcessor.ProcessingOptions(
+                excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},
+                parallel_processing=True,
+                batch_size=self.batch_size,
+                show_progress=True
+            )
+
+            def progress_update(msg: str):
+                self.queue.put(("log", msg))
+
+            # Get file list with options and convert all paths to absolute
+            files_to_process = [os.path.abspath(f) for f in FileProcessor.get_file_list(
+                self.folder_entry.get(),
+                self.include_pdfs.get(),
+                self.include_images.get(),
+                self.SUPPORTED_FORMATS,
+                options=options,
+                progress_callback=progress_update
+            )]
+
+            self.log_message("\nDebug: Files to process:")
+            for f in files_to_process:
+                self.log_message(f"  {f}")
 
             if not files_to_process:
                 self.handle_no_files()
                 return
 
+            # Apply sampling if enabled
+            if self.settings.use_sampling:
+                files_to_process = [os.path.abspath(f) for f in FileProcessor.prepare_file_list(
+                    self.folder_entry.get(),
+                    self.settings,
+                    self.SUPPORTED_FORMATS
+                )]
+
             # Initialize output handler
             self.initialize_output_handler(files_to_process)
 
-            # Process files by type
-            self.process_file_batches(files_to_process)
+            # Process files in parallel
+            def process_update(processed: int, total: int):
+                progress = (processed / total) * 100
+                self.queue.put(("progress", progress))
+                self.queue.put(("status", f"Processed {processed:,} of {total:,} files"))
+
+            results = []
+            for file_path in files_to_process:
+                if self.stop_event.is_set():
+                    break
+
+                file_results = self.process_single_file(file_path)
+                if file_results:
+                    # Handle both single results and lists of results
+                    if isinstance(file_results, list):
+                        results.extend(file_results)
+                    else:
+                        results.append(file_results)
+
+                progress_update(f"Processed: {file_path}")
+
+            # Write results
+            if results:
+                self.current_output_handler.write_batch(results, True)
 
             # Finalize processing
             self.finalize_processing()
@@ -1080,7 +1136,39 @@ class DocumentAnalyzerGUI:
         except Exception as e:
             self.handle_processing_error(e, "batch processing")
         finally:
+            os.chdir(original_working_dir)  # Restore original working directory
             self.cleanup_processing()
+
+    def process_single_file(self, file_path: str) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
+        """
+        Process a single file with appropriate analyzer.
+
+        Args:
+            file_path: Path to file to process
+
+        Returns:
+            Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]: Analysis results or None
+            Returns a list for PDFs (multiple pages) and a single dict for images
+        """
+        self.log_message(f"Debug: Processing file: {file_path}")
+
+        if self.stop_event.is_set():
+            return None
+
+        while self.pause_event.is_set():
+            if self.stop_event.is_set():
+                return None
+            time.sleep(0.1)
+
+        try:
+            if file_path.lower().endswith('.pdf'):
+                return self.process_pdf(file_path)  # Will return list of results
+            else:
+                # For image files, use the page_analyzer directly
+                return self.page_analyzer.analyze_image_file(os.path.abspath(file_path))
+        except Exception as e:
+            self.handle_processing_error(e, file_path)
+            return None
 
     def initialize_processing(self) -> None:
         """Initialize processing state and UI elements"""
@@ -1098,10 +1186,18 @@ class DocumentAnalyzerGUI:
         self.status_label.config(text="Initializing...")
         self.log_text.delete(1.0, tk.END)
 
+        # Create processing options
+        self.processing_options = FileProcessor.ProcessingOptions(
+            excluded_folders=self.settings.excluded_folders,
+            show_progress=True,
+            batch_size=self.batch_size
+        )
+
         # Log start of analysis
         self.log_message("Starting analysis...")
         self.log_message(f"Detection threshold: {self.threshold.get()}%")
         self.log_message(f"Using {self.selected_cores.get()} CPU cores")
+        self.log_message("Processing subdirectories: Yes")
 
         if self.use_sampling.get():
             self.log_message("Statistical sampling enabled")
@@ -1217,41 +1313,85 @@ class DocumentAnalyzerGUI:
                 self.handle_processing_error(e, file_path)
                 continue  # Continue with next file on other errors
 
-    def process_pdf(self, pdf_path: str) -> None:
+    def process_pdf(self, pdf_path: str) -> Optional[List[Dict[str, Any]]]:
         """
-        Process a single PDF file with multi-threaded page analysis
+        Process a single PDF file with multi-threaded page analysis.
 
         Args:
-            pdf_path: Path to the PDF file to process
+            pdf_path: Path to PDF file to process
+
+        Returns:
+            Optional[List[Dict[str, Any]]]: List of analysis results for all pages or None if processing failed
         """
+        self.log_message(f"Debug: Opening PDF: {pdf_path}")
+
+        abs_path = os.path.abspath(pdf_path)
         try:
             with fitz.open(pdf_path) as pdf:
+                # Check if PDF is encrypted
+                if pdf.is_encrypted:
+                    return [{
+                        "File": abs_path,
+                        "Page": 1,
+                        "Content Status": "Page 1 Processing Failed",
+                        "Type": "PDF",
+                        "Error": "Encryption Error: document closed or encrypted",
+                        "Error Severity": "WARNING"
+                    }]
+
                 total_pages = len(pdf)
+                results = []
 
-                # Create processing tasks for each page
-                with ThreadPoolExecutor(max_workers=self.selected_cores.get()) as executor:
-                    futures = []
-                    for i in range(total_pages):
-                        futures.append(
-                            executor.submit(
-                                self.analyze_pdf_page,
-                                pdf_path,
-                                i,
-                                total_pages
-                            )
+                # Process each page using the page_analyzer
+                for page_num in range(total_pages):
+                    if self.stop_event.is_set():
+                        break
+
+                    while self.pause_event.is_set():
+                        if self.stop_event.is_set():
+                            break
+                        time.sleep(0.1)
+
+                    try:
+                        result = self.page_analyzer.analyze_pdf_page(
+                            pdf[page_num],
+                            abs_path,
+                            page_num
                         )
+                        if result:
+                            results.append(result)
+                    except Exception as e:
+                        error_result = {
+                            "File": abs_path,
+                            "Page": page_num + 1,
+                            "Content Status": f"Page {page_num + 1} Processing Failed",
+                            "Type": "PDF",
+                            "Error": str(e),
+                            "Error Severity": "ERROR"
+                        }
+                        results.append(error_result)
 
-                    # Process results as they complete
-                    for future in futures:
-                        try:
-                            result = future.result()
-                            if result:
-                                self.add_result(result)
-                        except Exception as e:
-                            self.handle_processing_error(e, pdf_path)
+                return results if results else None
 
+        except fitz.FileDataError as e:
+            return [{
+                "File": abs_path,
+                "Page": 1,
+                "Content Status": "Page 1 Processing Failed",
+                "Type": "PDF",
+                "Error": "Encryption Error: document closed or encrypted",
+                "Error Severity": "WARNING"
+            }]
         except Exception as e:
             self.handle_processing_error(e, pdf_path)
+            return [{
+                "File": abs_path,
+                "Page": 1,
+                "Content Status": "Processing Failed",
+                "Type": "PDF",
+                "Error": str(e),
+                "Error Severity": "ERROR"
+            }]
 
     def process_image_batch(self, image_files: List[str]) -> None:
         """
@@ -1428,17 +1568,26 @@ class DocumentAnalyzerGUI:
                     self.settings = replace(self.settings, total_files=0)
                 return 0
 
-            # Count files based on current settings
+            # Create processing options
+            options = FileProcessor.ProcessingOptions(
+                excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},
+                show_progress=True
+            )
+
+            def progress_update(msg: str):
+                self.log_message(msg)
+
+            # Count files based on current settings with progress tracking
             files = FileProcessor.get_file_list(
                 path_to_check,
                 self.include_pdfs.get(),
                 self.include_images.get(),
-                self.SUPPORTED_FORMATS  # Changed from self.supported_formats
+                self.SUPPORTED_FORMATS,
+                options=options,
+                progress_callback=progress_update if trigger != "checkbox" else None
             )
 
             total_files = len(files)
-            pdf_count = len([f for f in files if f.lower().endswith('.pdf')])
-            image_count = total_files - pdf_count
 
             # No files case
             if total_files == 0:
@@ -1450,6 +1599,9 @@ class DocumentAnalyzerGUI:
 
             # Files found case
             count_text = f"Files to analyze: {total_files:,}"
+            pdf_count = len([f for f in files if f.lower().endswith('.pdf')])
+            image_count = total_files - pdf_count
+
             details = []
             if pdf_count > 0:
                 details.append(f"{pdf_count:,} PDF{'' if pdf_count == 1 else 's'}")
@@ -1478,40 +1630,78 @@ class DocumentAnalyzerGUI:
         messagebox.showwarning("No Files", "No compatible files found in the selected folder!")
         self.queue.put(("complete", None))
 
-    def analyze_pdf_page(self, pdf_path: str, page_num: int, total_pages: int) -> Optional[Dict[str, Any]]:
+    def analyze_pdf_page(self, page: fitz.Page, file_path: str,
+                         page_num: int) -> Dict[str, Any]:
         """
-        Analyze a single PDF page
+        Analyze a PDF page for margin content.
 
         Args:
-            pdf_path: Path to PDF file
-            page_num: Page number to analyze
-            total_pages: Total number of pages in PDF
+            page: PDF page object to analyze
+            file_path: Path to PDF file
+            page_num: Page number being analyzed (0-based)
 
         Returns:
-            Optional[Dict[str, Any]]: Analysis results or None if processing stopped
+            Dict[str, Any]: Analysis results
         """
-        # Check for stop condition first
-        if self.stop_event.is_set():
-            return None
-
-        # Handle pause condition
-        while self.pause_event.is_set():
-            if self.stop_event.is_set():
-                return None
-            time.sleep(0.1)
+        self.log_message(f"Debug: Analyzing PDF page: {file_path}, page {page_num + 1}")
 
         try:
-            with fitz.open(pdf_path) as pdf:
-                page = pdf[page_num]
+            # Analyze text content
+            text_analysis = self.content_analyzer.analyze_text_blocks(page)
 
-                # Update progress
-                self.update_progress(page_num, total_pages)
+            # Convert to image and analyze
+            pix = page.get_pixmap(matrix=fitz.Matrix(
+                self.content_analyzer.dpi / 72, self.content_analyzer.dpi / 72))
+            image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            image_analysis = self.content_analyzer.analyze_image_content(image)
 
-                # Analyze page
-                return self.page_analyzer.analyze_pdf_page(page, pdf_path, page_num)
+            # Determine overall content status
+            locations = []
+            if text_analysis.has_top_content or image_analysis.has_top_content:
+                locations.append("header")
+            if text_analysis.has_bottom_content or image_analysis.has_bottom_content:
+                locations.append("footer")
+
+            content_status = (
+                "Content found in " + " and ".join(locations) if locations
+                else "All content within margins"
+            )
+
+            # Create detailed result with absolute path
+            abs_path = os.path.abspath(file_path)  # Convert to absolute path
+            result = {
+                "File": abs_path,
+                "Page": page_num + 1,
+                "Content Status": content_status,
+                "Text Status": self._format_text_status(text_analysis),
+                "Image Status": self._format_image_status(image_analysis),
+                "Type": "PDF",
+                "Analysis Details": {
+                    "Text": {
+                        "Top Content": f"{text_analysis.top_content_percentage:.1f}%",
+                        "Bottom Content": f"{text_analysis.bottom_content_percentage:.1f}%",
+                    },
+                    "Image": {
+                        "Top Content": f"{image_analysis.top_content_percentage:.1f}%",
+                        "Bottom Content": f"{image_analysis.bottom_content_percentage:.1f}%",
+                    }
+                }
+            }
+
+            return result
 
         except Exception as e:
-            return self.handle_page_error(e, pdf_path, page_num)
+            # Handle any errors with absolute path
+            abs_path = os.path.abspath(file_path)
+            return {
+                "File": abs_path,
+                "Page": page_num + 1,
+                "Content Status": f"Page {page_num + 1} Processing Failed",
+                "Type": "PDF",
+                "Error": str(e),
+                "Error Severity": "ERROR"
+            }
+
 
     def complete_analysis(self) -> None:
         """Handle analysis completion and error reporting"""
@@ -1803,50 +1993,55 @@ class DocumentAnalyzerGUI:
         if image_count > 0:
             self.log_message(f"  - {image_count:,} image file{'' if image_count == 1 else 's'}")
 
-    def analyze_image_file(self, image_path: str, is_page: bool = False) -> Optional[str]:
-        """Analyze image content in margins"""
-        if self.stop_event.is_set():
-            return None
+    def analyze_image_file(self, image_path: str) -> Dict[str, Any]:
+        """
+        Analyze an image file for margin content.
 
-        while self.pause_event.is_set():
-            if self.stop_event.is_set():
-                return None
-            time.sleep(0.1)
+        Args:
+            image_path: Path to image file to analyze
 
+        Returns:
+            Dict[str, Any]: Analysis results
+        """
+        abs_path = os.path.abspath(image_path)  # Convert to absolute path at the start
         try:
-            # Open and analyze image
-            with Image.open(image_path) if not is_page else image_path as image:
-                # Analyze image content
-                analysis_result = self.page_analyzer.analyze_image_file(image)
+            with Image.open(image_path) as image:
+                image = image.convert('RGB')
+                analysis = self.content_analyzer.analyze_image_content(image)
 
-                # Determine content status based on analysis result
-                top_content = analysis_result['Top Content']
-                bottom_content = analysis_result['Bottom Content']
-                total_margin_content = analysis_result['Total Margin Content']
+                locations = []
+                if analysis.has_top_content:
+                    locations.append("header")
+                if analysis.has_bottom_content:
+                    locations.append("footer")
 
-                if top_content > self.threshold.get() or bottom_content > self.threshold.get():
-                    content_status = "Content found in header or footer"
-                else:
-                    content_status = "All content within margins"
+                content_status = (
+                    "Content found in " + " and ".join(locations) if locations
+                    else "All content within margins"
+                )
 
-                # Create result dictionary
-                result = {
-                    "File": os.path.basename(image_path),
-                    "Page": 1.0,
-                    "ContentStatus": content_status,
-                    "TextStatus": "",  # Not applicable for images
-                    "ImageStatus": content_status,
+                return {
+                    "File": abs_path,  # Use absolute path
+                    "Page": 1,
+                    "Content Status": content_status,
                     "Type": "Image",
-                    "AnalysisDetails": analysis_result,
-                    "Error": "",
-                    "ErrorSeverity": ""
+                    "Analysis Details": {
+                        "Top Content": f"{analysis.top_content_percentage:.1f}%",
+                        "Bottom Content": f"{analysis.bottom_content_percentage:.1f}%",
+                        "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
+                    }
                 }
 
-                return result
-
         except Exception as e:
-            self.queue.put(("log", f"Error processing image {os.path.basename(image_path)}: {str(e)}"))
-            return None
+            return {
+                "File": abs_path,  # Use absolute path in error case too
+                "Page": 1,
+                "Content Status": "Processing Failed",
+                "Type": "Image",
+                "Analysis Details": {},
+                "Error": str(e),
+                "Error Severity": "ERROR"
+            }
 
     def log_message(self, message: str) -> None:
         """Add timestamped message to log"""
@@ -2224,6 +2419,7 @@ def main() -> None:
                 pass
 
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

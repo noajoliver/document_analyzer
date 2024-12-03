@@ -2,6 +2,7 @@ import os
 import time
 import json
 import sqlite3
+import csv
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 import pandas as pd
@@ -70,10 +71,15 @@ class CSVOutputHandler(OutputHandler):
             json.dump(self.get_metadata_dict(), f, indent=2)
 
     def get_next_filename(self) -> str:
-        """Generate the next filename for split files"""
+        """
+        Generate the next filename for split files.
+        Returns absolute path for the output file.
+        """
         if self.current_file_number == 1:
-            return self.output_path
-        base, ext = os.path.splitext(self.output_path)
+            return os.path.abspath(self.output_path)
+
+        abs_path = os.path.abspath(self.output_path)
+        base, ext = os.path.splitext(abs_path)
         return f"{base}__{self.current_file_number}{ext}"
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
@@ -89,17 +95,20 @@ class CSVOutputHandler(OutputHandler):
         output_file = self.get_next_filename()
         write_header = not os.path.exists(output_file) or self.total_rows_written == 0
 
-        # Convert to DataFrame and specify dtype for Page column
+        # Ensure we preserve the complete file paths
         df_batch = pd.DataFrame(batch)
+        if 'File' in df_batch.columns:
+            df_batch['File'] = df_batch['File'].apply(lambda x: os.path.abspath(x))
         if 'Page' in df_batch.columns:
-            df_batch['Page'] = df_batch['Page'].astype('Int64')  # Use nullable integer type
+            df_batch['Page'] = df_batch['Page'].astype('Int64')
 
         df_batch.to_csv(
             output_file,
             mode='a' if not write_header else 'w',
             header=write_header,
             index=False,
-            encoding='utf-8'
+            encoding='utf-8',
+            quoting=csv.QUOTE_MINIMAL  # Add this line to properly handle paths with commas
         )
 
         self.total_rows_written += current_batch_size

@@ -1,8 +1,10 @@
 import math
 import random
 import os
-from typing import List, TypeVar, Sequence, Set
-from dataclasses import dataclass
+from typing import List, TypeVar, Sequence, Set, Dict, Any, Optional, Callable
+from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 
 T = TypeVar('T')
 
@@ -141,37 +143,114 @@ class SamplingCalculator:
 class FileProcessor:
     """Handles file processing with optional sampling"""
 
+    @dataclass
+    class ProcessingOptions:
+        """Configuration options for file processing"""
+        max_depth: Optional[int] = None  # None means no limit
+        excluded_folders: Set[str] = field(default_factory=set)
+        parallel_processing: bool = True
+        batch_size: int = 1000
+        show_progress: bool = True
+
     @staticmethod
     def get_file_list(folder_path: str, include_pdfs: bool, include_images: bool,
-                      supported_formats: Set[str]) -> List[str]:
-        """
-        Get list of files to process based on inclusion criteria, including subfolders
+                      supported_formats: Set[str],
+                      options: Optional['FileProcessor.ProcessingOptions'] = None,
+                      progress_callback: Optional[Callable[[str], None]] = None) -> List[str]:
+        """Get list of files to process based on inclusion criteria"""
+        files = set()  # Use set for uniqueness
+        options = options or FileProcessor.ProcessingOptions()
+        current_depth = 0
 
-        Args:
-            folder_path: Path to folder containing files
-            include_pdfs: Whether to include PDF files
-            include_images: Whether to include image files
-            supported_formats: Set of supported image file extensions
+        # Convert input folder path to absolute path
+        abs_folder_path = os.path.abspath(folder_path)
 
-        Returns:
-            List of file paths matching criteria
-        """
-        files = []
+        def should_process_directory(dir_path: str, depth: int) -> bool:
+            """Check if directory should be processed based on options"""
+            if options.max_depth is not None and depth > options.max_depth:
+                return False
 
-        def scan_directory(path: str):
-            with os.scandir(path) as entries:
-                for entry in entries:
-                    if entry.is_file():
-                        ext = os.path.splitext(entry.name.lower())[1]
-                        if (include_pdfs and ext == '.pdf') or (
-                                include_images and ext in supported_formats):
-                            files.append(entry.path)
-                    elif entry.is_dir():
-                        scan_directory(entry.path)
+            dir_name = os.path.basename(dir_path)
+            if dir_name in options.excluded_folders:
+                return False
 
-        scan_directory(folder_path)
-        return files
+            return True
 
+        def scan_directory(path: str, depth: int):
+            """Scan directory for matching files"""
+            if not should_process_directory(path, depth):
+                return
+
+            try:
+                with os.scandir(path) as entries:
+                    for entry in entries:
+                        if progress_callback:
+                            progress_callback(f"Scanning: {entry.path}")
+
+                        if entry.is_file():
+                            ext = os.path.splitext(entry.name.lower())[1]
+                            if (include_pdfs and ext == '.pdf') or (
+                                    include_images and ext in supported_formats):
+                                # Use the full path from scandir
+                                files.add(entry.path)
+                        elif entry.is_dir():
+                            scan_directory(entry.path, depth + 1)
+            except PermissionError:
+                if progress_callback:
+                    progress_callback(f"Permission denied: {path}")
+            except Exception as e:
+                if progress_callback:
+                    progress_callback(f"Error scanning {path}: {str(e)}")
+
+        # Start scan from absolute folder path
+        scan_directory(abs_folder_path, current_depth)
+        return sorted(files)  # Return sorted list of file paths
+
+
+    @staticmethod
+    def process_files_parallel(file_list: List[str],
+                               processor: Callable[[str], Dict[str, Any]],
+                               max_workers: int,
+                               batch_size: int = 1000,
+                               progress_callback: Optional[Callable[[int, int], None]] = None) -> List[Dict[str, Any]]:
+        """Process files in parallel batches"""
+        results = []
+        total_files = len(file_list)
+        processed_files = 0
+        results_lock = Lock()
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            for i in range(0, total_files, batch_size):
+                batch = file_list[i:i + batch_size]
+                futures = []
+
+                for file_path in batch:
+                    futures.append(executor.submit(processor, file_path))
+
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        if result:
+                            with results_lock:
+                                results.append(result)
+                        processed_files += 1
+                        if progress_callback:
+                            progress_callback(processed_files, total_files)
+                    except Exception as e:
+                        if progress_callback:
+                            progress_callback(f"Error processing file: {str(e)}")
+
+        return results
+
+    @classmethod
+    def calculate_sample_size(cls, params: SamplingParameters) -> int:
+        """Calculate required sample size"""
+        return SamplingCalculator.calculate_sample_size(params)
+
+    @classmethod
+    def select_random_files(cls, files: Sequence[T], sample_size: int) -> List[T]:
+        """Select random files from the population"""
+        return SamplingCalculator.select_random_files(files, sample_size)
 
     @classmethod
     def prepare_file_list(cls, folder_path: str, settings: 'AnalysisSettings',
@@ -207,10 +286,10 @@ class FileProcessor:
                 population_size=total_files
             )
 
-            sample_size = SamplingCalculator.calculate_sample_size(params)
+            sample_size = cls.calculate_sample_size(params)
             settings.sample_size = sample_size
             settings.total_files = total_files
 
-            return SamplingCalculator.select_random_files(files, sample_size)
+            return cls.select_random_files(files, sample_size)
 
         return files

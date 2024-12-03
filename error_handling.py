@@ -103,7 +103,7 @@ class ErrorHandler:
         )
 
     def handle_error(self, error: Exception, file_name: str,
-                    page_number: Optional[int] = None) -> ProcessingError:
+                     page_number: Optional[int] = None) -> ProcessingError:
         """Process and categorize an error"""
 
         # Categorize the error

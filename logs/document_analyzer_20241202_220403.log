@@ -1,0 +1,36 @@
+2024-12-02 22:04:18,469 - WARNING - File: G:\My Drive\Acer Spin Laptop Backup\Documents\Test\Test Document 7.pdf (page 1)
+Page: N/A
+Category: Encryption Error
+Severity: WARNING
+Message: document closed or encrypted
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1332, in process_pdf
+    pdf[page_num],
+    ~~~^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 5798, in __getitem__
+    return self.load_page(i)
+           ^^^^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 4172, in load_page
+    raise ValueError("document closed or encrypted")
+ValueError: document closed or encrypted
+
+Timestamp: 2024-12-02T22:04:02.949582
+--------------------------------------------------------------------------------
+2024-12-02 22:04:19,396 - WARNING - File: G:\My Drive\Acer Spin Laptop Backup\Documents\Test\subfolder 2\Long Folder Name 1\Long Folder Name 2\Long Folder Name 3\Test Document 7.pdf (page 1)
+Page: N/A
+Category: Encryption Error
+Severity: WARNING
+Message: document closed or encrypted
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1332, in process_pdf
+    pdf[page_num],
+    ~~~^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 5798, in __getitem__
+    return self.load_page(i)
+           ^^^^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 4172, in load_page
+    raise ValueError("document closed or encrypted")
+ValueError: document closed or encrypted
+
+Timestamp: 2024-12-02T22:04:02.949582
+--------------------------------------------------------------------------------

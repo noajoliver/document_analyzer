@@ -194,7 +194,7 @@ class ContentAnalyzer:
         )
 
     def _calculate_overlap_area(self, bbox: Tuple[float, float, float, float],
-                              margin_start: float, margin_end: float) -> float:
+                                margin_start: float, margin_end: float) -> float:
         """Calculate area of overlap between text block and margin"""
         overlap_height = min(bbox[3], margin_end) - max(bbox[1], margin_start)
         if overlap_height <= 0:
@@ -256,7 +256,7 @@ class PageAnalyzer:
 
         # Create detailed result
         result = {
-            "File": os.path.basename(file_name),
+            "File": file_name,
             "Page": page_num + 1,
             "Content Status": content_status,
             "Text Status": self._format_text_status(text_analysis),
@@ -304,7 +304,7 @@ class PageAnalyzer:
                 )
 
                 return {
-                    "File": os.path.basename(image_path),
+                    "File": image_path,
                     "Page": 1,
                     "Content Status": content_status,
                     "Type": "Image",
