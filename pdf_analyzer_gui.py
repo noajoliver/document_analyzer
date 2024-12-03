@@ -198,17 +198,25 @@ class DocumentAnalyzerGUI:
 
         Returns:
             bool: True if settings were updated successfully, False otherwise
-
-        Note:
-            This method updates the instance settings without recreating
-            analyzers. For full update including analyzers, use update_analyzers().
         """
         try:
             # Create new settings from current GUI values
-            new_settings = self._create_settings()
+            new_settings = AnalysisSettings(
+                threshold=self.threshold.get(),
+                output_format=self.output_format.get(),
+                max_rows_per_file=self.max_rows.get(),
+                use_sampling=self.use_sampling.get(),
+                confidence_level=float(self.confidence_level.get()) / 100,
+                margin_of_error=float(self.margin_of_error.get()) / 100,
+                include_pdfs=self.include_pdfs.get(),
+                include_images=self.include_images.get()
+            )
 
             # Update instance settings
             self.settings = new_settings
+
+            # Recreate page analyzer with new settings
+            self.page_analyzer = PageAnalyzer(self.settings)
 
             # Log the update
             self.log_message("Settings updated:")
@@ -1662,6 +1670,10 @@ class DocumentAnalyzerGUI:
             return
 
         try:
+            # Update settings first
+            if not self.update_settings():
+                return
+
             # Get current file count
             folder_path = self.folder_entry.get()
             files = FileProcessor.get_file_list(
@@ -1679,7 +1691,7 @@ class DocumentAnalyzerGUI:
                 )
                 return
 
-            # Update settings
+            # Update settings with file counts
             self.settings = AnalysisSettings(
                 threshold=self.threshold.get(),
                 output_format=self.output_format.get(),
@@ -1739,10 +1751,15 @@ class DocumentAnalyzerGUI:
             self.status_label.config(text="Starting analysis...")
             self.log_text.delete(1.0, tk.END)
 
-            # Log initial status
+            # Log initial status and settings
             self.log_message("Starting analysis...")
             self.log_message(f"Detection threshold: {self.threshold.get()}%")
             self.log_message(f"Using {self.selected_cores.get()} CPU cores")
+
+            if self.use_sampling.get():
+                self.log_message("Statistical sampling enabled")
+                self.log_message(f"Confidence Level: {self.confidence_level.get()}%")
+                self.log_message(f"Margin of Error: {self.margin_of_error.get()}%")
 
             # Start processing in a separate thread
             thread = Thread(target=self.process_files, daemon=True)
@@ -1770,19 +1787,6 @@ class DocumentAnalyzerGUI:
                     self.output_handler.cleanup()
                 except Exception as cleanup_error:
                     self.log_message(f"Error during cleanup: {str(cleanup_error)}")
-
-    def update_settings(self):
-        """Update analysis settings"""
-        self.settings = AnalysisSettings(
-            threshold=self.threshold.get(),
-            output_format=self.output_format.get(),
-            max_rows_per_file=self.max_rows.get(),
-            use_sampling=self.use_sampling.get(),
-            confidence_level=float(self.confidence_level.get()) / 100,
-            margin_of_error=float(self.margin_of_error.get()) / 100,
-            include_pdfs=self.include_pdfs.get(),
-            include_images=self.include_images.get()
-        )
 
     def _update_count_display(self, text: str, color: str, count: int) -> None:
         """Update file count display and settings"""

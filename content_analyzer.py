@@ -85,6 +85,9 @@ class ContentAnalyzer:
         Returns:
             MarginAnalysisResult with analysis details
         """
+        # Print initial threshold value
+        print(f"\nAnalyzing with threshold: {self.threshold}%")
+
         # Convert image to grayscale for more accurate content detection
         gray_image = image.convert('L')
 
@@ -97,27 +100,35 @@ class ContentAnalyzer:
         # Analyze top margin
         top_margin = img_array[:measurements.margin_pixels, :]
         top_pixels = np.sum(top_margin < 250)  # Less than 250 indicates non-white
-        top_percentage = (top_pixels / (
-                    measurements.width * measurements.margin_pixels)) * 100  # Convert to percentage immediately
+        top_percentage = (top_pixels / (measurements.width * measurements.margin_pixels)) * 100
 
         # Analyze bottom margin
         bottom_margin = img_array[-measurements.margin_pixels:, :]
         bottom_pixels = np.sum(bottom_margin < 250)
-        bottom_percentage = (bottom_pixels / (
-                    measurements.width * measurements.margin_pixels)) * 100  # Convert to percentage immediately
+        bottom_percentage = (bottom_pixels / (measurements.width * measurements.margin_pixels)) * 100
+
+        # Debug print
+        print(f"Top percentage: {top_percentage}%")
+        print(f"Bottom percentage: {bottom_percentage}%")
+        print(f"Threshold comparison: {top_percentage} > {self.threshold} = {top_percentage > self.threshold}")
+        print(f"                     {bottom_percentage} > {self.threshold} = {bottom_percentage > self.threshold}")
 
         # Calculate total affected area
         total_margin_pixels = 2 * measurements.width * measurements.margin_pixels
-        total_percentage = ((
-                                        top_pixels + bottom_pixels) / total_margin_pixels) * 100  # Convert to percentage immediately
+        total_percentage = ((top_pixels + bottom_pixels) / total_margin_pixels) * 100
 
-        return MarginAnalysisResult(
-            has_top_content=top_percentage > measurements.threshold,  # Compare percentages directly
-            has_bottom_content=bottom_percentage > measurements.threshold,  # Compare percentages directly
-            top_content_percentage=top_percentage,  # Already in percentage form
-            bottom_content_percentage=bottom_percentage,  # Already in percentage form
-            total_content_percentage=total_percentage  # Already in percentage form
+        result = MarginAnalysisResult(
+            has_top_content=top_percentage > self.threshold,
+            has_bottom_content=bottom_percentage > self.threshold,
+            top_content_percentage=top_percentage,
+            bottom_content_percentage=bottom_percentage,
+            total_content_percentage=total_percentage
         )
+
+        print(f"Final has_top_content: {result.has_top_content}")
+        print(f"Final has_bottom_content: {result.has_bottom_content}")
+
+        return result
 
     def analyze_text_blocks(self, page: fitz.Page) -> MarginAnalysisResult:
         """
@@ -201,8 +212,13 @@ class PageAnalyzer:
         Args:
             settings: Analysis settings including threshold
         """
+        # Add debug print to verify the threshold
+        print(f"Initializing PageAnalyzer with threshold: {settings.threshold}%")
         self.content_analyzer = ContentAnalyzer(threshold=settings.threshold)
         self.settings = settings
+
+        # Verify the threshold was set correctly
+        print(f"ContentAnalyzer threshold set to: {self.content_analyzer.threshold}%")
 
     def analyze_pdf_page(self, page: fitz.Page, file_name: str,
                          page_num: int) -> Dict[str, Any]:
@@ -226,18 +242,23 @@ class PageAnalyzer:
         image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         image_analysis = self.content_analyzer.analyze_image_content(image)
 
-        # Determine overall status - any text in margins or image content above threshold
-        has_margin_content = (text_analysis.has_top_content or  # Any text in margins
-                              text_analysis.has_bottom_content or
-                              image_analysis.has_top_content or  # Image content above threshold
-                              image_analysis.has_bottom_content)
+        # Determine overall content status
+        locations = []
+        if text_analysis.has_top_content or image_analysis.has_top_content:
+            locations.append("header")
+        if text_analysis.has_bottom_content or image_analysis.has_bottom_content:
+            locations.append("footer")
+
+        content_status = (
+            "Content found in " + " and ".join(locations) if locations
+            else "All content within margins"
+        )
 
         # Create detailed result
         result = {
             "File": os.path.basename(file_name),
             "Page": page_num + 1,
-            "Content Status": "Content found in header or footer" if has_margin_content
-            else "All content within margins",
+            "Content Status": content_status,
             "Text Status": self._format_text_status(text_analysis),
             "Image Status": self._format_image_status(image_analysis),
             "Type": "PDF",
@@ -270,21 +291,15 @@ class PageAnalyzer:
                 image = image.convert('RGB')
                 analysis = self.content_analyzer.analyze_image_content(image)
 
-                # Check content against threshold
-                has_content = (
-                        analysis.top_content_percentage > self.settings.threshold or
-                        analysis.bottom_content_percentage > self.settings.threshold
-                )
-
-                # Build location string if content is found
+                # Determine locations of content
                 locations = []
-                if analysis.top_content_percentage > self.settings.threshold:
+                if analysis.has_top_content:
                     locations.append("header")
-                if analysis.bottom_content_percentage > self.settings.threshold:
+                if analysis.has_bottom_content:
                     locations.append("footer")
 
                 content_status = (
-                    f"Content found in {' and '.join(locations)}" if locations
+                    "Content found in " + " and ".join(locations) if locations
                     else "All content within margins"
                 )
 

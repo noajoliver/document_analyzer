@@ -1,0 +1,18 @@
+2024-12-02 19:25:35,842 - WARNING - File: G:/My Drive/Acer Spin Laptop Backup/Documents/Test\Test Document 7.pdf
+Page: 1
+Category: Encryption Error
+Severity: WARNING
+Message: document closed or encrypted
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1505, in analyze_pdf_page
+    page = pdf[page_num]
+           ~~~^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 5798, in __getitem__
+    return self.load_page(i)
+           ^^^^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\fitz\fitz.py", line 4172, in load_page
+    raise ValueError("document closed or encrypted")
+ValueError: document closed or encrypted
+
+Timestamp: 2024-12-02T19:25:13.719482
+--------------------------------------------------------------------------------

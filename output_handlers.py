@@ -89,7 +89,11 @@ class CSVOutputHandler(OutputHandler):
         output_file = self.get_next_filename()
         write_header = not os.path.exists(output_file) or self.total_rows_written == 0
 
+        # Convert to DataFrame and specify dtype for Page column
         df_batch = pd.DataFrame(batch)
+        if 'Page' in df_batch.columns:
+            df_batch['Page'] = df_batch['Page'].astype('Int64')  # Use nullable integer type
+
         df_batch.to_csv(
             output_file,
             mode='a' if not write_header else 'w',
@@ -116,6 +120,9 @@ class ParquetOutputHandler(OutputHandler):
 
         if is_final:
             df = pd.DataFrame(self.all_data)
+            if 'Page' in df.columns:
+                df['Page'] = df['Page'].astype('Int64')  # Use nullable integer type
+
             table = pa.Table.from_pandas(df)
 
             # Convert metadata to strings for Parquet compatibility
@@ -198,7 +205,7 @@ class SQLiteOutputHandler(OutputHandler):
                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
                 [(
                     r['File'],
-                    r.get('Page', 1),
+                    int(r.get('Page', 1)) if r.get('Page') is not None else None,  # Ensure integer
                     r['Content Status'],
                     r.get('Text Status', ''),
                     r.get('Image Status', ''),
