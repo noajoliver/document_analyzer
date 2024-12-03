@@ -145,7 +145,7 @@ class FileProcessor:
     def get_file_list(folder_path: str, include_pdfs: bool, include_images: bool,
                       supported_formats: Set[str]) -> List[str]:
         """
-        Get list of files to process based on inclusion criteria
+        Get list of files to process based on inclusion criteria, including subfolders
 
         Args:
             folder_path: Path to folder containing files
@@ -157,14 +157,21 @@ class FileProcessor:
             List of file paths matching criteria
         """
         files = []
-        for filename in os.listdir(folder_path):
-            file_path = os.path.join(folder_path, filename)
-            if os.path.isfile(file_path):
-                ext = os.path.splitext(filename.lower())[1]
-                if (include_pdfs and ext == '.pdf') or (
-                        include_images and ext in supported_formats):
-                    files.append(file_path)
+
+        def scan_directory(path: str):
+            with os.scandir(path) as entries:
+                for entry in entries:
+                    if entry.is_file():
+                        ext = os.path.splitext(entry.name.lower())[1]
+                        if (include_pdfs and ext == '.pdf') or (
+                                include_images and ext in supported_formats):
+                            files.append(entry.path)
+                    elif entry.is_dir():
+                        scan_directory(entry.path)
+
+        scan_directory(folder_path)
         return files
+
 
     @classmethod
     def prepare_file_list(cls, folder_path: str, settings: 'AnalysisSettings',
