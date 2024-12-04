@@ -71,10 +71,7 @@ class CSVOutputHandler(OutputHandler):
             json.dump(self.get_metadata_dict(), f, indent=2)
 
     def get_next_filename(self) -> str:
-        """
-        Generate the next filename for split files.
-        Returns absolute path for the output file.
-        """
+        """Generate next filename for split files"""
         if self.current_file_number == 1:
             return os.path.abspath(self.output_path)
 
@@ -87,7 +84,26 @@ class CSVOutputHandler(OutputHandler):
         if not batch and not is_final:
             return None
 
-        current_batch_size = len(batch)
+        # Process each result to extract only needed fields
+        processed_results = []
+        for result in batch:
+            if self.settings.minimal_output:
+                # For minimal output, only include specified fields
+                processed_result = {
+                    'File': os.path.abspath(result['File']),
+                    'Page': result.get('Page', 1),
+                    'Content Status': result['Content Status']
+                }
+            else:
+                # For full output, include all fields
+                processed_result = result.copy()
+                if 'File' in processed_result:
+                    processed_result['File'] = os.path.abspath(processed_result['File'])
+
+            processed_results.append(processed_result)
+
+        # Check if we need a new file
+        current_batch_size = len(processed_results)
         if self.total_rows_written + current_batch_size > self.settings.max_rows_per_file:
             self.current_file_number += 1
             self.total_rows_written = 0
@@ -95,25 +111,25 @@ class CSVOutputHandler(OutputHandler):
         output_file = self.get_next_filename()
         write_header = not os.path.exists(output_file) or self.total_rows_written == 0
 
-        # Ensure we preserve the complete file paths
-        df_batch = pd.DataFrame(batch)
-        if 'File' in df_batch.columns:
-            df_batch['File'] = df_batch['File'].apply(lambda x: os.path.abspath(x))
+        # Convert to DataFrame
+        df_batch = pd.DataFrame(processed_results)
+
+        # For Page column, ensure it's properly typed
         if 'Page' in df_batch.columns:
             df_batch['Page'] = df_batch['Page'].astype('Int64')
 
+        # Write to CSV
         df_batch.to_csv(
             output_file,
             mode='a' if not write_header else 'w',
             header=write_header,
             index=False,
             encoding='utf-8',
-            quoting=csv.QUOTE_MINIMAL  # Add this line to properly handle paths with commas
+            quoting=csv.QUOTE_MINIMAL
         )
 
         self.total_rows_written += current_batch_size
         return output_file
-
 
 class ParquetOutputHandler(OutputHandler):
     """Handles output in Parquet format"""

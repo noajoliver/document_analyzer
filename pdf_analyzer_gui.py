@@ -44,7 +44,8 @@ class AnalysisSettings:
     total_files: Optional[int] = None
     include_pdfs: bool = True
     include_images: bool = True
-    process_subdirectories: bool = True  # Added this option
+    process_subdirectories: bool = True
+    minimal_output: bool = False
     excluded_folders: Set[str] = field(default_factory=lambda: {'$RECYCLE.BIN', 'System Volume Information'})
 
     def __post_init__(self):
@@ -211,7 +212,8 @@ class DocumentAnalyzerGUI:
                 confidence_level=float(self.confidence_level.get()) / 100,
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
-                include_images=self.include_images.get()
+                include_images=self.include_images.get(),
+                minimal_output=self.minimal_output.get()
             )
 
             # Update instance settings
@@ -979,9 +981,20 @@ class DocumentAnalyzerGUI:
         )
         format_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
 
+        # Add Minimal Output checkbox
+        self.minimal_output = tk.BooleanVar(value=False)
+        minimal_frame = ttk.Frame(output_frame)
+        minimal_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
+
+        ttk.Checkbutton(
+            minimal_frame,
+            text="Minimal Output (File, Page, Content Status only)",
+            variable=self.minimal_output
+        ).grid(row=0, column=0, sticky=tk.W, padx=5)
+
         # CSV-specific options frame
         self.csv_options = ttk.Frame(output_frame)
-        self.csv_options.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        self.csv_options.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         ttk.Label(self.csv_options, text="Max Rows per File:").grid(
             row=0, column=0, sticky=tk.W, padx=5
@@ -1059,11 +1072,14 @@ class DocumentAnalyzerGUI:
 
     def process_files(self) -> None:
         """Main method for processing all selected files"""
-        original_working_dir = os.getcwd()  # Store original working directory
+        original_working_dir = os.getcwd()
 
         try:
             # Initialize processing state
             self.initialize_processing()
+
+            def progress_update(msg: str):
+                self.queue.put(("log", msg))
 
             # Create processing options
             options = FileProcessor.ProcessingOptions(
@@ -1072,9 +1088,6 @@ class DocumentAnalyzerGUI:
                 batch_size=self.batch_size,
                 show_progress=True
             )
-
-            def progress_update(msg: str):
-                self.queue.put(("log", msg))
 
             # Get file list with options and convert all paths to absolute
             files_to_process = [os.path.abspath(f) for f in FileProcessor.get_file_list(
@@ -1086,35 +1099,46 @@ class DocumentAnalyzerGUI:
                 progress_callback=progress_update
             )]
 
-            self.log_message("\nDebug: Files to process:")
-            for f in files_to_process:
-                self.log_message(f"  {f}")
-
             if not files_to_process:
                 self.handle_no_files()
                 return
 
             # Apply sampling if enabled
             if self.settings.use_sampling:
-                files_to_process = [os.path.abspath(f) for f in FileProcessor.prepare_file_list(
-                    self.folder_entry.get(),
-                    self.settings,
-                    self.SUPPORTED_FORMATS
-                )]
+                self.log_message("\nCalculating sample size...")
+                params = SamplingParameters(
+                    confidence_level=self.settings.confidence_level,
+                    margin_of_error=self.settings.margin_of_error,
+                    population_size=len(files_to_process)
+                )
+
+                sample_size = SamplingCalculator.calculate_sample_size(params)
+                self.settings.sample_size = sample_size
+                self.settings.total_files = len(files_to_process)
+
+                files_to_process = SamplingCalculator.select_random_files(files_to_process, sample_size)
+
+                self.log_message(
+                    f"Using statistical sampling: {sample_size:,} files will be analyzed "
+                    f"({(sample_size / len(files_to_process) * 100):.1f}% of total)"
+                )
 
             # Initialize output handler
             self.initialize_output_handler(files_to_process)
 
-            # Process files in parallel
-            def process_update(processed: int, total: int):
-                progress = (processed / total) * 100
-                self.queue.put(("progress", progress))
-                self.queue.put(("status", f"Processed {processed:,} of {total:,} files"))
+            total_files = len(files_to_process)
+            processed_count = 0
 
+            # Process each file
             results = []
             for file_path in files_to_process:
                 if self.stop_event.is_set():
                     break
+
+                while self.pause_event.is_set():
+                    if self.stop_event.is_set():
+                        break
+                    time.sleep(0.1)
 
                 file_results = self.process_single_file(file_path)
                 if file_results:
@@ -1124,7 +1148,10 @@ class DocumentAnalyzerGUI:
                     else:
                         results.append(file_results)
 
-                progress_update(f"Processed: {file_path}")
+                processed_count += 1
+                progress = (processed_count / total_files) * 100
+                self.queue.put(("progress", progress))
+                self.queue.put(("status", f"Processed {processed_count:,} of {total_files:,} files"))
 
             # Write results
             if results:
@@ -1136,7 +1163,7 @@ class DocumentAnalyzerGUI:
         except Exception as e:
             self.handle_processing_error(e, "batch processing")
         finally:
-            os.chdir(original_working_dir)  # Restore original working directory
+            os.chdir(original_working_dir)
             self.cleanup_processing()
 
     def process_single_file(self, file_path: str) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
@@ -1161,11 +1188,28 @@ class DocumentAnalyzerGUI:
             time.sleep(0.1)
 
         try:
+            def minimize_result(result: Dict[str, Any]) -> Dict[str, Any]:
+                """Extract only minimal fields if minimal output is selected"""
+                if self.minimal_output.get():
+                    return {
+                        'File': result['File'],
+                        'Page': result.get('Page', 1),
+                        'Content Status': result['Content Status']
+                    }
+                return result
+
             if file_path.lower().endswith('.pdf'):
-                return self.process_pdf(file_path)  # Will return list of results
+                results = self.process_pdf(file_path)  # Will return list of results
+                if results:
+                    return [minimize_result(result) for result in results]
+                return None
             else:
                 # For image files, use the page_analyzer directly
-                return self.page_analyzer.analyze_image_file(os.path.abspath(file_path))
+                result = self.page_analyzer.analyze_image_file(os.path.abspath(file_path))
+                if result:
+                    return minimize_result(result)
+                return None
+
         except Exception as e:
             self.handle_processing_error(e, file_path)
             return None

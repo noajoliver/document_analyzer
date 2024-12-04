@@ -1,0 +1,36 @@
+2024-12-03 13:53:37,920 - WARNING - File: batch processing
+Page: N/A
+Category: Unknown Error
+Severity: WARNING
+Message: __cinit__() got an unexpected keyword argument 'metadata'
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1131, in process_files
+    self.current_output_handler.write_batch(results, True)
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 140, in write_batch
+    pq.write_table(
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\pyarrow\parquet\core.py", line 3104, in write_table
+    with ParquetWriter(
+         ^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\pyarrow\parquet\core.py", line 1016, in __init__
+    self.writer = _parquet.ParquetWriter(
+                  ^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow\\_parquet.pyx", line 1807, in pyarrow._parquet.ParquetWriter.__cinit__
+TypeError: __cinit__() got an unexpected keyword argument 'metadata'
+
+Timestamp: 2024-12-03T13:53:19.070426
+--------------------------------------------------------------------------------
+2024-12-03 13:58:27,108 - ERROR - File: batch processing
+Page: N/A
+Category: Unknown Error
+Severity: ERROR
+Message: 'str' object has no attribute 'items'
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1131, in process_files
+    self.current_output_handler.write_batch(results, True)
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 234, in write_batch
+    for key, value in type_details.items():
+                      ^^^^^^^^^^^^^^^^^^
+AttributeError: 'str' object has no attribute 'items'
+
+Timestamp: 2024-12-03T13:53:19.070426
+--------------------------------------------------------------------------------
