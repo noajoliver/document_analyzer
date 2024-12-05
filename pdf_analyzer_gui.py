@@ -569,6 +569,17 @@ class DocumentAnalyzerGUI:
         # Control buttons at bottom
         self.setup_control_buttons(self.main_frame, current_row)
 
+        # Configure row weights to allow proper expansion
+        for i in range(current_row + 1):
+            self.main_frame.rowconfigure(i, weight=0)  # Don't expand by default
+
+        # Give weight to the row containing the log section to allow it to expand
+        log_row = current_row - 1  # The row where log section was added
+        self.main_frame.rowconfigure(log_row, weight=1)
+
+        # Set up initial window geometry
+        self.setup_window_geometry()
+
     def setup_window_geometry(self) -> None:
         """Configure initial window size and position"""
         # Calculate dimensions
