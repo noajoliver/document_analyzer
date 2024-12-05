@@ -22,8 +22,7 @@ class AnalysisMetadata:
     confidence_level: Optional[float] = None
     margin_of_error: Optional[float] = None
     sample_size: Optional[int] = None
-    random_n_requested: Optional[int] = None
-    random_n_selected: Optional[int] = None
+    random_n_size: Optional[int] = None  # Single field for random N sampling
     total_files: Optional[int] = None
 
     def __post_init__(self):
@@ -36,12 +35,8 @@ class AnalysisMetadata:
                 raise ValueError("Statistical sampling requires confidence level and margin of error")
 
         if self.sampling_method == "random_n":
-            if self.random_n_requested is None:
-                raise ValueError("Random N sampling requires requested sample size")
-            if self.random_n_selected is None:
-                raise ValueError("Random N sampling requires actual selected size")
-            if self.random_n_selected > self.random_n_requested:
-                raise ValueError("Selected sample size cannot exceed requested size")
+            if self.random_n_size is None:
+                raise ValueError("Random N sampling requires sample size")
 
 
 class OutputHandler:
@@ -53,10 +48,12 @@ class OutputHandler:
         self.metadata = AnalysisMetadata(
             created_at=datetime.now().isoformat(),
             threshold=settings.threshold,
-            sampling_enabled=settings.sample_size is not None,
-            confidence_level=settings.confidence_level,
-            margin_of_error=settings.margin_of_error,
-            sample_size=settings.sample_size,
+            sampling_method="random_n" if settings.use_random_n else "statistical" if settings.use_sampling else "none",
+            sampling_enabled=settings.use_sampling or settings.use_random_n,
+            confidence_level=settings.confidence_level if settings.use_sampling else None,
+            margin_of_error=settings.margin_of_error if settings.use_sampling else None,
+            sample_size=settings.sample_size if settings.use_sampling else None,
+            random_n_size=settings.random_n_size if settings.use_random_n else None,
             total_files=settings.total_files
         )
 
