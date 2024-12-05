@@ -17,11 +17,31 @@ class AnalysisMetadata:
     created_at: str
     threshold: float
     format_version: str = "1.0"
+    sampling_method: str = "none"  # "none", "statistical", or "random_n"
     sampling_enabled: bool = False
     confidence_level: Optional[float] = None
     margin_of_error: Optional[float] = None
     sample_size: Optional[int] = None
+    random_n_requested: Optional[int] = None
+    random_n_selected: Optional[int] = None
     total_files: Optional[int] = None
+
+    def __post_init__(self):
+        """Validate metadata after initialization"""
+        if self.sampling_method not in ["none", "statistical", "random_n"]:
+            raise ValueError("Invalid sampling method")
+
+        if self.sampling_method == "statistical":
+            if self.confidence_level is None or self.margin_of_error is None:
+                raise ValueError("Statistical sampling requires confidence level and margin of error")
+
+        if self.sampling_method == "random_n":
+            if self.random_n_requested is None:
+                raise ValueError("Random N sampling requires requested sample size")
+            if self.random_n_selected is None:
+                raise ValueError("Random N sampling requires actual selected size")
+            if self.random_n_selected > self.random_n_requested:
+                raise ValueError("Selected sample size cannot exceed requested size")
 
 
 class OutputHandler:

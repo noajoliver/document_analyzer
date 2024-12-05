@@ -1,0 +1,13 @@
+2024-12-04 11:32:19,834 - ERROR - File: batch processing
+Page: N/A
+Category: Unknown Error
+Severity: ERROR
+Message: name 'random' is not defined
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1199, in process_files
+    files_to_process = random.sample(files_to_process, sample_size)
+                       ^^^^^^
+NameError: name 'random' is not defined. Did you forget to import 'random'
+
+Timestamp: 2024-12-04T11:32:01.466582
+--------------------------------------------------------------------------------

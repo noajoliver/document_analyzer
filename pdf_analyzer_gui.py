@@ -37,7 +37,10 @@ class AnalysisSettings:
     threshold: float
     output_format: str
     max_rows_per_file: int
+    excluded_folders: Set[str]
     use_sampling: bool = False
+    use_random_n: bool = False
+    random_n_size: Optional[int] = None
     confidence_level: float = 0.95
     margin_of_error: float = 0.05
     sample_size: Optional[int] = None
@@ -46,7 +49,6 @@ class AnalysisSettings:
     include_images: bool = True
     process_subdirectories: bool = True
     minimal_output: bool = False
-    excluded_folders: Set[str] = field(default_factory=lambda: {'$RECYCLE.BIN', 'System Volume Information'})
 
     def __post_init__(self):
         """Validate settings after initialization"""
@@ -59,11 +61,23 @@ class AnalysisSettings:
         if self.max_rows_per_file < 1:
             raise ValueError("Max rows per file must be positive")
 
+        # Validate sampling settings
+        if self.use_sampling and self.use_random_n:
+            raise ValueError("Cannot use both statistical sampling and random N sampling")
+
         if self.use_sampling:
             if not 0 < self.confidence_level < 1:
                 raise ValueError("Confidence level must be between 0 and 1")
             if not 0 < self.margin_of_error < 1:
                 raise ValueError("Margin of error must be between 0 and 1")
+
+        if self.use_random_n:
+            if self.random_n_size is None:
+                raise ValueError("Random N size must be specified when using random N sampling")
+            if self.random_n_size < 1:
+                raise ValueError("Random N size must be positive")
+            if self.total_files is not None and self.random_n_size > self.total_files:
+                raise ValueError("Random N size cannot be larger than total files")
 
 
 class DocumentAnalyzerGUI:
@@ -105,6 +119,8 @@ class DocumentAnalyzerGUI:
         self.output_format = tk.StringVar(value=self.DEFAULT_OUTPUT_FORMAT)
         self.max_rows = tk.IntVar(value=self.DEFAULT_MAX_ROWS)
         self.use_sampling = tk.BooleanVar(value=False)
+        self.use_random_n = tk.BooleanVar(value=False)
+        self.random_n_size = tk.StringVar(value='100')  # Default to 100 files
         self.confidence_level = tk.StringVar(value='95')
         self.margin_of_error = tk.StringVar(value='5')
 
@@ -135,6 +151,17 @@ class DocumentAnalyzerGUI:
         self.current_file_number = 1
         self.results_batch = []
         self.total_rows_written = 0
+
+        # Processing options initialization
+        self.processing_options = FileProcessor.ProcessingOptions(
+            excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},
+            parallel_processing=True,
+            batch_size=self.DEFAULT_BATCH_SIZE,
+            show_progress=True
+        )
+
+        # Last sampling change tracker for mutual exclusivity
+        self._last_sampling_change = None
 
     def _init_components(self):
         """Initialize analysis components and settings tracker"""
@@ -177,18 +204,22 @@ class DocumentAnalyzerGUI:
             confidence = float(self.confidence_level.get()) / 100
             margin = float(self.margin_of_error.get()) / 100
 
+            # Define default excluded folders
+            excluded_folders = {'$RECYCLE.BIN', 'System Volume Information'}
+
             # Create and return settings object
             return AnalysisSettings(
                 threshold=self.threshold.get(),
                 output_format=self.output_format.get(),
                 max_rows_per_file=self.max_rows.get(),
+                excluded_folders=excluded_folders,  # Now explicitly passed
                 use_sampling=self.use_sampling.get(),
+                use_random_n=self.use_random_n.get(),
+                random_n_size=int(self.random_n_size.get()) if self.use_random_n.get() else None,
                 confidence_level=confidence,
                 margin_of_error=margin,
                 include_pdfs=self.include_pdfs.get(),
-                include_images=self.include_images.get(),
-                sample_size=None,  # Will be calculated later if sampling is enabled
-                total_files=None  # Will be set when files are counted
+                include_images=self.include_images.get()
             )
         except ValueError as e:
             raise ValueError(f"Invalid settings values: {str(e)}")
@@ -208,12 +239,15 @@ class DocumentAnalyzerGUI:
                 threshold=self.threshold.get(),
                 output_format=self.output_format.get(),
                 max_rows_per_file=self.max_rows.get(),
+                excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},  # Explicitly set
                 use_sampling=self.use_sampling.get(),
+                use_random_n=self.use_random_n.get(),
+                random_n_size=int(self.random_n_size.get()) if self.use_random_n.get() else None,
                 confidence_level=float(self.confidence_level.get()) / 100,
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
-                minimal_output=self.minimal_output.get()
+                minimal_output=self.minimal_output.get() if hasattr(self, 'minimal_output') else False
             )
 
             # Update instance settings
@@ -227,8 +261,10 @@ class DocumentAnalyzerGUI:
             self.log_message(f"  Detection threshold: {self.settings.threshold}%")
             self.log_message(f"  Output format: {self.settings.output_format}")
             if self.settings.use_sampling:
-                self.log_message(f"  Sampling enabled (CL: {self.settings.confidence_level * 100}%, "
+                self.log_message(f"  Statistical sampling enabled (CL: {self.settings.confidence_level * 100}%, "
                                  f"ME: {self.settings.margin_of_error * 100}%)")
+            elif self.settings.use_random_n:
+                self.log_message(f"  Random N sampling enabled (N: {self.settings.random_n_size})")
 
             return True
 
@@ -918,28 +954,40 @@ class DocumentAnalyzerGUI:
         core_help.grid(row=0, column=3, padx=5)
 
     def setup_sampling_controls(self, parent: ttk.Frame) -> None:
-        """Setup statistical sampling controls"""
+        """Setup sampling controls with both statistical and random N options"""
         sampling_frame = ttk.Frame(parent)
         sampling_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
-        # Main sampling checkbox
+        # Create container for checkboxes
+        checkbox_frame = ttk.Frame(sampling_frame)
+        checkbox_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # Statistical sampling checkbox
         ttk.Checkbutton(
-            sampling_frame,
+            checkbox_frame,
             text="Use Statistical Sampling",
             variable=self.use_sampling,
             command=self.toggle_sampling_options
-        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, padx=5)
+        ).grid(row=0, column=0, padx=5, sticky=tk.W)
 
-        # Sampling options subframe (hidden by default)
-        self.sampling_options = ttk.Frame(sampling_frame)
-        self.sampling_options.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        # Random N sampling checkbox
+        ttk.Checkbutton(
+            checkbox_frame,
+            text="Random Sample of N Files",
+            variable=self.use_random_n,
+            command=self.toggle_sampling_options
+        ).grid(row=0, column=1, padx=5, sticky=tk.W)
+
+        # Statistical sampling options subframe
+        self.statistical_options = ttk.Frame(sampling_frame)
+        self.statistical_options.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
         # Confidence Level
-        ttk.Label(self.sampling_options, text="Confidence Level:").grid(
+        ttk.Label(self.statistical_options, text="Confidence Level:").grid(
             row=0, column=0, sticky=tk.W, padx=5
         )
         ttk.Combobox(
-            self.sampling_options,
+            self.statistical_options,
             textvariable=self.confidence_level,
             values=['90', '95', '99'],
             state='readonly',
@@ -947,19 +995,36 @@ class DocumentAnalyzerGUI:
         ).grid(row=0, column=1, padx=5)
 
         # Margin of Error
-        ttk.Label(self.sampling_options, text="Margin of Error (%):").grid(
+        ttk.Label(self.statistical_options, text="Margin of Error (%):").grid(
             row=0, column=2, sticky=tk.W, padx=5
         )
         ttk.Combobox(
-            self.sampling_options,
+            self.statistical_options,
             textvariable=self.margin_of_error,
             values=['1', '3', '5', '10'],
             state='readonly',
             width=5
         ).grid(row=0, column=3, padx=5)
 
-        # Initially hide sampling options
-        self.sampling_options.grid_remove()
+        # Random N options subframe
+        self.random_n_options = ttk.Frame(sampling_frame)
+        self.random_n_options.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # Number of files selection
+        ttk.Label(self.random_n_options, text="Number of Files:").grid(
+            row=0, column=0, sticky=tk.W, padx=5
+        )
+        ttk.Combobox(
+            self.random_n_options,
+            textvariable=self.random_n_size,
+            values=['10', '100', '500', '1000', '5000', '10000'],
+            state='readonly',
+            width=8
+        ).grid(row=0, column=1, padx=5)
+
+        # Initially hide both option frames
+        self.statistical_options.grid_remove()
+        self.random_n_options.grid_remove()
 
     def setup_output_config(self, parent: ttk.Frame) -> None:
         """Setup output configuration controls"""
@@ -1123,6 +1188,20 @@ class DocumentAnalyzerGUI:
                     f"({(sample_size / len(files_to_process) * 100):.1f}% of total)"
                 )
 
+            # Apply random N sampling if enabled
+            elif self.settings.use_random_n:
+                self.log_message("\nSelecting random files...")
+                n_files = min(int(self.random_n_size.get()), len(files_to_process))
+                self.settings.random_n_size = n_files
+                self.settings.total_files = len(files_to_process)
+
+                files_to_process = SamplingCalculator.select_random_files(files_to_process, n_files)
+
+                self.log_message(
+                    f"Using random sampling: {n_files:,} files will be analyzed "
+                    f"({(n_files / self.settings.total_files * 100):.1f}% of total)"
+                )
+
             # Initialize output handler
             self.initialize_output_handler(files_to_process)
 
@@ -1230,11 +1309,13 @@ class DocumentAnalyzerGUI:
         self.status_label.config(text="Initializing...")
         self.log_text.delete(1.0, tk.END)
 
-        # Create processing options
+        # Create processing options with current settings
         self.processing_options = FileProcessor.ProcessingOptions(
             excluded_folders=self.settings.excluded_folders,
+            parallel_processing=True,
+            batch_size=self.batch_size,
             show_progress=True,
-            batch_size=self.batch_size
+            max_depth=None  # No depth limit for subdirectories
         )
 
         # Log start of analysis
@@ -1243,10 +1324,29 @@ class DocumentAnalyzerGUI:
         self.log_message(f"Using {self.selected_cores.get()} CPU cores")
         self.log_message("Processing subdirectories: Yes")
 
+        # Log sampling configuration
         if self.use_sampling.get():
             self.log_message("Statistical sampling enabled")
             self.log_message(f"Confidence Level: {self.confidence_level.get()}%")
             self.log_message(f"Margin of Error: {self.margin_of_error.get()}%")
+        elif self.use_random_n.get():
+            self.log_message("Random N sampling enabled")
+            self.log_message(f"Number of files to sample: {self.random_n_size.get()}")
+
+        # Log file type selection
+        file_types = []
+        if self.include_pdfs.get():
+            file_types.append("PDF files")
+        if self.include_images.get():
+            file_types.append("Image files")
+        self.log_message(f"File types selected: {', '.join(file_types)}")
+
+        # Log output configuration
+        self.log_message(f"Output format: {self.output_format.get().upper()}")
+        if self.output_format.get() == 'csv':
+            self.log_message(f"Max rows per file: {self.max_rows.get():,}")
+        if hasattr(self, 'minimal_output') and self.minimal_output.get():
+            self.log_message("Minimal output mode enabled")
 
     def prepare_file_list(self) -> List[str]:
         """
@@ -1262,7 +1362,9 @@ class DocumentAnalyzerGUI:
             folder_path,
             self.include_pdfs.get(),
             self.include_images.get(),
-            self.SUPPORTED_FORMATS
+            self.SUPPORTED_FORMATS,
+            options=self.processing_options,
+            progress_callback=lambda msg: self.log_message(msg)
         )
 
         total_files = len(files)
@@ -1285,8 +1387,19 @@ class DocumentAnalyzerGUI:
 
             files = SamplingCalculator.select_random_files(files, sample_size)
             self.log_message(
-                f"Using statistical sampling: {sample_size:,} files selected "
+                f"Using statistical sampling: {sample_size:,} files will be analyzed "
                 f"({(sample_size / total_files * 100):.1f}% of total)"
+            )
+
+        elif self.use_random_n.get():
+            n_files = min(int(self.random_n_size.get()), total_files)
+            self.settings.random_n_size = n_files
+            self.settings.total_files = total_files
+
+            files = SamplingCalculator.select_random_files(files, n_files)
+            self.log_message(
+                f"Using random sampling: {n_files:,} files will be analyzed "
+                f"({(n_files / total_files * 100):.1f}% of total)"
             )
 
         return files
@@ -1612,23 +1725,14 @@ class DocumentAnalyzerGUI:
                     self.settings = replace(self.settings, total_files=0)
                 return 0
 
-            # Create processing options
-            options = FileProcessor.ProcessingOptions(
-                excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},
-                show_progress=True
-            )
-
-            def progress_update(msg: str):
-                self.log_message(msg)
-
-            # Count files based on current settings with progress tracking
+            # Count files
             files = FileProcessor.get_file_list(
                 path_to_check,
                 self.include_pdfs.get(),
                 self.include_images.get(),
                 self.SUPPORTED_FORMATS,
-                options=options,
-                progress_callback=progress_update if trigger != "checkbox" else None
+                options=self.processing_options,
+                progress_callback=lambda msg: self.log_message(msg) if trigger != "checkbox" else None
             )
 
             total_files = len(files)
@@ -1641,8 +1745,22 @@ class DocumentAnalyzerGUI:
                 self._update_count_display(message, 'red', 0)
                 return 0
 
-            # Files found case
-            count_text = f"Files to analyze: {total_files:,}"
+            # Calculate displayed file count based on sampling settings
+            if self.use_sampling.get():
+                params = SamplingParameters(
+                    confidence_level=float(self.confidence_level.get()) / 100,
+                    margin_of_error=float(self.margin_of_error.get()) / 100,
+                    population_size=total_files
+                )
+                sample_size = SamplingCalculator.calculate_sample_size(params)
+                count_text = f"Files to analyze: {sample_size:,} (statistical sample from {total_files:,} total)"
+            elif self.use_random_n.get():
+                n_files = min(int(self.random_n_size.get()), total_files)
+                count_text = f"Files to analyze: {n_files:,} (random sample from {total_files:,} total)"
+            else:
+                count_text = f"Files to analyze: {total_files:,}"
+
+            # Add file type breakdown
             pdf_count = len([f for f in files if f.lower().endswith('.pdf')])
             image_count = total_files - pdf_count
 
@@ -1878,6 +1996,11 @@ class DocumentAnalyzerGUI:
             )
             return False
 
+        # Validate sampling options
+        if self.use_sampling.get() and self.use_random_n.get():
+            messagebox.showerror("Error", "Please select only one sampling method!")
+            return False
+
         if self.use_sampling.get():
             try:
                 confidence = float(self.confidence_level.get()) / 100
@@ -1886,6 +2009,15 @@ class DocumentAnalyzerGUI:
                     raise ValueError
             except ValueError:
                 messagebox.showerror("Error", "Invalid sampling parameters!")
+                return False
+
+        if self.use_random_n.get():
+            try:
+                n_files = int(self.random_n_size.get())
+                if n_files < 1:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Error", "Invalid number of files selected!")
                 return False
 
         selected_cores = self.selected_cores.get()
@@ -1930,12 +2062,15 @@ class DocumentAnalyzerGUI:
                 threshold=self.threshold.get(),
                 output_format=self.output_format.get(),
                 max_rows_per_file=self.max_rows.get(),
+                excluded_folders={'$RECYCLE.BIN', 'System Volume Information'},
                 use_sampling=self.use_sampling.get(),
+                use_random_n=self.use_random_n.get(),
+                random_n_size=int(self.random_n_size.get()) if self.use_random_n.get() else None,
                 confidence_level=float(self.confidence_level.get()) / 100,
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
-                total_files=total_files  # Set total files count
+                total_files=total_files
             )
 
             # Calculate sample size if sampling is enabled
@@ -1950,6 +2085,13 @@ class DocumentAnalyzerGUI:
                 self.log_message(
                     f"Using statistical sampling: {sample_size:,} files will be analyzed "
                     f"({(sample_size / total_files * 100):.1f}% of total)"
+                )
+            elif self.settings.use_random_n:
+                n_files = min(int(self.random_n_size.get()), total_files)
+                self.settings.random_n_size = n_files
+                self.log_message(
+                    f"Using random sampling: {n_files:,} files will be analyzed "
+                    f"({(n_files / total_files * 100):.1f}% of total)"
                 )
 
             # Initialize output handler
@@ -1994,6 +2136,9 @@ class DocumentAnalyzerGUI:
                 self.log_message("Statistical sampling enabled")
                 self.log_message(f"Confidence Level: {self.confidence_level.get()}%")
                 self.log_message(f"Margin of Error: {self.margin_of_error.get()}%")
+            elif self.use_random_n.get():
+                self.log_message("Random N sampling enabled")
+                self.log_message(f"Number of files: {self.random_n_size.get()}")
 
             # Start processing in a separate thread
             thread = Thread(target=self.process_files, daemon=True)
@@ -2222,14 +2367,32 @@ class DocumentAnalyzerGUI:
     Any text found in margins is always flagged."""
 
     def toggle_sampling_options(self) -> None:
-        """Show or hide sampling options based on checkbox state"""
+        """Show or hide sampling options based on checkbox states"""
         try:
+            # Ensure mutual exclusivity
+            if self.use_sampling.get() and self.use_random_n.get():
+                # If one was just checked, uncheck the other
+                if self._last_sampling_change == "statistical":
+                    self.use_random_n.set(False)
+                else:
+                    self.use_sampling.set(False)
+
+            # Show/hide appropriate options
             if self.use_sampling.get():
-                self.sampling_options.grid()
-                self.update_file_count(trigger="checkbox")  # Recalculate with sampling
+                self._last_sampling_change = "statistical"
+                self.statistical_options.grid()
+                self.random_n_options.grid_remove()
+            elif self.use_random_n.get():
+                self._last_sampling_change = "random_n"
+                self.random_n_options.grid()
+                self.statistical_options.grid_remove()
             else:
-                self.sampling_options.grid_remove()
-                self.update_file_count(trigger="checkbox")  # Recalculate without sampling
+                self.statistical_options.grid_remove()
+                self.random_n_options.grid_remove()
+
+            # Update file count display
+            self.update_file_count(trigger="checkbox")
+
         except Exception as e:
             self.handle_ui_error(e)
 
