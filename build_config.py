@@ -104,11 +104,24 @@ if {platform.system() == "Windows"} and os.path.exists(POPPLER_PATH):
             POPPLER_DATA.append((str(file_path), 'poppler'))
 
 # Data files configuration
-data_files = []
-if os.path.exists('README.md'):
-    data_files.append(('README.md', '.'))
-if os.path.exists('icon.ico'):
-    data_files.append(('icon.ico', '.'))
+data_files = [
+    ('README.md', '.'),
+    ('icon.ico', '.'),
+    ('requirements.txt', '.'),
+]
+
+# Add additional module files
+module_files = [
+    'content_analyzer.py',
+    'error_handling.py',
+    'output_handlers.py',
+    'sampling.py',
+    'pdf_utils.py'
+]
+
+for module in module_files:
+    if os.path.exists(module):
+        data_files.append((module, '.'))
 
 a = Analysis(
     ['pdf_analyzer_gui.py'],
@@ -132,6 +145,10 @@ a = Analysis(
         'tkinter.filedialog',
         'pyarrow',
         'pyarrow.parquet',
+        'pyarrow.lib',
+        'winsound',
+        'PIL.ImageDraw',
+        'PIL.ImageFilter',
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -189,7 +206,7 @@ readme_content = '''Document Margin Analyzer
 This application analyzes PDF documents and images for content in header and footer areas.
 
 Features:
-- Configurable margin detection threshold
+- Configurable margin detection threshold (0.1-10.0%)
 - Multiple output formats (CSV, Parquet, SQLite)
 - Statistical sampling for large document sets
 - Comprehensive error handling and reporting
@@ -203,7 +220,7 @@ Requirements:
 Usage:
 1. Launch DocumentMarginAnalyzer.exe
 2. Configure analysis settings:
-   - Detection threshold (1-20%)
+   - Detection threshold (0.1-10.0%)
    - Output format
    - Optional statistical sampling
 3. Select input folder containing PDFs and/or images
@@ -221,6 +238,11 @@ For support, please report issues on the project repository.
 
 with open('dist/README.txt', 'w', encoding='utf-8') as f:
     f.write(readme_content)
+
+# Create logs directory in dist
+logs_dir = os.path.join('dist', 'logs')
+if not os.path.exists(logs_dir):
+    os.makedirs(logs_dir)
 """
 
     with open('pdf_analyzer.spec', 'w', encoding='utf-8') as f:
@@ -293,7 +315,8 @@ def verify_module_files():
         'content_analyzer.py',
         'error_handling.py',
         'output_handlers.py',
-        'sampling.py'
+        'sampling.py',
+        'pdf_utils.py'
     ]
 
     missing_files = []
