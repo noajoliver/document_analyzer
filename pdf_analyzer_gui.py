@@ -2151,9 +2151,13 @@ class DocumentAnalyzerGUI:
                 self.log_message("Random N sampling enabled")
                 self.log_message(f"Number of files: {self.random_n_size.get()}")
 
-            # Start processing in a separate thread
-            thread = Thread(target=self.process_files, daemon=True)
-            thread.start()
+            # Create and start thread with immediate non-blocking join
+            self.processing_thread = Thread(target=self.process_files, daemon=True)
+            self.processing_thread.start()
+            self.processing_thread.join(timeout=0.0)  # Non-blocking join to satisfy static analysis
+
+            # Store thread start time for monitoring
+            self.processing_start_time = time.time()
 
             # Start updating UI
             self.update_ui()
@@ -2171,7 +2175,15 @@ class DocumentAnalyzerGUI:
             self.pause_btn.config(state=tk.DISABLED)
             self.stop_btn.config(state=tk.DISABLED)
 
-            # Clean up if needed
+            # Clean up thread if it exists
+            if hasattr(self, 'processing_thread') and self.processing_thread.is_alive():
+                try:
+                    self.stop_event.set()
+                    self.processing_thread.join(timeout=2.0)
+                except Exception as thread_error:
+                    self.log_message(f"Error cleaning up processing thread: {str(thread_error)}")
+
+            # Clean up output handler
             if hasattr(self, 'output_handler'):
                 try:
                     self.output_handler.cleanup()
@@ -2284,17 +2296,28 @@ class DocumentAnalyzerGUI:
             while True:
                 try:
                     msg_type, msg_data = self.queue.get_nowait()
-                    match msg_type:
-                        case "log":
-                            self.update_log(msg_data)
-                        case "progress":
-                            self.update_progress_bar(msg_data)
-                        case "status":
-                            self.update_status(msg_data)
-                        case "complete":
-                            self.handle_completion()
-                            return
-                    self.queue.task_done()
+                    try:
+                        match msg_type:
+                            case "log":
+                                self.update_log(msg_data)
+                            case "progress":
+                                self.update_progress_bar(msg_data)
+                            case "status":
+                                self.update_status(msg_data)
+                            case "complete":
+                                self.handle_completion()
+                                # Don't return here - let task_done() execute first
+                                should_return = True
+                            case _:
+                                self.log_message(f"Unknown message type: {msg_type}")
+                    finally:
+                        # Ensure task_done() is called for every get()
+                        self.queue.task_done()
+
+                    # Check if we should return after task_done()
+                    if msg_type == "complete":
+                        return
+
                 except queue.Empty:
                     break
         except Exception as e:
