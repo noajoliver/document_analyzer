@@ -8,6 +8,49 @@ from pathlib import Path
 import requests
 
 
+def verify_dependencies():
+    """Verify critical dependencies are available"""
+    missing_deps = []
+
+    print("Verifying dependencies...")
+
+    # Dictionary of dependencies and their import names
+    dependencies = {
+        'PyMuPDF': 'fitz',
+        'pdf2image': 'pdf2image',
+        'Pillow': 'PIL',
+        'pandas': 'pandas',
+        'numpy': 'numpy',
+        'pyinstaller': 'PyInstaller',
+        'requests': 'requests',
+        'pyarrow': 'pyarrow',
+    }
+
+    for package, import_name in dependencies.items():
+        try:
+            __import__(import_name)
+            print(f"✓ {package} verified")
+        except ImportError:
+            missing_deps.append(package)
+            print(f"✗ {package} not found")
+
+    # Additional checks for SQLite (built into Python)
+    try:
+        import sqlite3
+        print("✓ SQLite3 support verified")
+    except ImportError:
+        missing_deps.append('sqlite3')
+        print("✗ SQLite3 support not found")
+
+    if missing_deps:
+        print("\nMissing dependencies:")
+        for dep in missing_deps:
+            print(f"  - {dep}")
+        return False
+
+    print("\nAll dependencies verified successfully!")
+    return True
+
 def download_poppler():
     """Download and set up Poppler based on the operating system."""
 
@@ -349,6 +392,12 @@ def main():
 
     # Check Python version
     if not check_python_version():
+        return
+
+    # Add dependency verification
+    if not verify_dependencies():
+        print("\nPlease install missing dependencies using:")
+        print("pip install -r requirements.txt")
         return
 
     # Verify all module files are present

@@ -12,6 +12,53 @@ from typing import Optional, Tuple
 from datetime import datetime
 
 
+def cleanup_old_files():
+    """Clean up old build files and directories"""
+    print("Cleaning up old build files...")
+
+    cleanup_paths = [
+        'pdf_analyzer.spec',
+        'build',
+        'dist',
+        '__pycache__',
+        '*.pyc',
+        '*.pyo',
+        '*.pyd',
+        'logs/*.log',
+        '*.parquet',  # Add cleanup for parquet files
+        '*.db',       # Add cleanup for SQLite databases
+        '*.db-journal',  # Add cleanup for SQLite journal files
+        '*.db-wal',     # Add cleanup for SQLite WAL files
+        '*.db-shm',     # Add cleanup for SQLite shared memory files
+        '*_metadata.json'  # Add cleanup for metadata files
+    ]
+
+    for path in cleanup_paths:
+        try:
+            if '*' in path:
+                # Handle wildcards
+                for file in Path('.').glob(path):
+                    try:
+                        if file.is_file():
+                            file.unlink()
+                            print(f"Removed file: {file}")
+                        elif file.is_dir():
+                            shutil.rmtree(file)
+                            print(f"Removed directory: {file}")
+                    except Exception as e:
+                        print(f"Error cleaning up {file}: {str(e)}")
+            else:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    print(f"Removed file: {path}")
+                elif os.path.isdir(path):
+                    shutil.rmtree(path)
+                    print(f"Removed directory: {path}")
+        except Exception as e:
+            print(f"Error cleaning up {path}: {str(e)}")
+
+    print("Cleanup completed")
+
 def is_admin() -> bool:
     """Check if script is running with administrator privileges"""
     try:
@@ -356,6 +403,9 @@ def main():
         if not success:
             print(f"Error during cleanup: {output}")
             return 1
+
+        # Add the new cleanup call here
+        cleanup_old_files()  # Add this line
 
         # Create and move to temporary build directory
         print("\nStep 2: Setting up temporary build environment...")

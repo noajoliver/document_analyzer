@@ -53,6 +53,13 @@ def clean_build():
         'build.*',
         'dist.*',
         '.venv',
+        # Add database and output file patterns
+        '*.parquet',
+        '*.db',
+        '*.db-journal',
+        '*.db-wal',
+        '*.db-shm',
+        '*_metadata.json'
     ]
 
     # Remove PyInstaller cache directories
@@ -61,13 +68,28 @@ def clean_build():
         os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'pyinstaller'),
     ]
 
-    for cache_dir in cache_dirs:
-        if os.path.exists(cache_dir):
-            try:
-                shutil.rmtree(cache_dir, onerror=handle_readonly_files)
-                print(f"Removed PyInstaller cache: {cache_dir}")
-            except Exception as e:
-                print(f"Error removing PyInstaller cache at {cache_dir}: {e}")
+    def handle_readonly_files(func, path, exc_info):
+        """Error handler for handling read-only files and locked databases"""
+        try:
+            if platform.system() == "Windows":
+                if not os.access(path, os.W_OK):
+                    # Clear readonly flag
+                    os.chmod(path, stat.S_IWUSR)
+                    func(path)
+                # Handle locked database files
+                elif path.endswith(('.db', '.db-journal', '.db-wal', '.db-shm')):
+                    try:
+                        import sqlite3
+                        conn = sqlite3.connect(path)
+                        conn.close()
+                        time.sleep(0.1)  # Give system time to release file
+                        func(path)
+                    except:
+                        pass
+            else:
+                raise
+        except Exception as e:
+            print(f"Warning: Could not remove {path}: {str(e)}")
 
     # Find and remove partial builds first
     partial_builds = find_partial_builds()
@@ -80,6 +102,15 @@ def clean_build():
             print(f"Removed partial build: {path}")
         except Exception as e:
             print(f"Error removing partial build {path}: {e}")
+
+    # Remove PyInstaller cache
+    for cache_dir in cache_dirs:
+        if os.path.exists(cache_dir):
+            try:
+                shutil.rmtree(cache_dir, onerror=handle_readonly_files)
+                print(f"Removed PyInstaller cache: {cache_dir}")
+            except Exception as e:
+                print(f"Error removing PyInstaller cache at {cache_dir}: {e}")
 
     # Clean all paths
     for path in paths_to_remove:
