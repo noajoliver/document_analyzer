@@ -3,12 +3,14 @@ import time
 import json
 import sqlite3
 import csv
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from datetime import datetime
+from threading import Lock
+from enum import Enum
 
 
 @dataclass
@@ -262,113 +264,236 @@ class ParquetOutputHandler(OutputHandler):
 
 
 class SQLiteOutputHandler(OutputHandler):
-    """Handles output in SQLite format"""
+    """Handles output in SQLite format with thread-safe operations"""
 
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.output_path = f"{os.path.splitext(output_path)[0]}.db"
-        self.conn = sqlite3.connect(self.output_path)
-        self.create_tables()
+        self.batch_size = 1000
+        self.row_count = 0
+        self.connection_lock = Lock()
+        self.setup_database()
 
-    def create_tables(self):
-        """Create necessary database tables"""
-        with self.conn:
-            # Create results table
-            self.conn.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_results (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_name TEXT NOT NULL,
-                    page_number INTEGER,
-                    content_status TEXT,
-                    text_status TEXT,
-                    image_status TEXT,
-                    file_type TEXT,
-                    processing_error TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+    def _get_connection(self) -> sqlite3.Connection:
+        """Create a new database connection with appropriate settings"""
+        conn = sqlite3.connect(self.output_path, timeout=60)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA temp_store = MEMORY")
+        conn.execute("PRAGMA cache_size = -2000")
+        conn.execute("PRAGMA busy_timeout = 30000")
+        return conn
 
-            # Create metadata table
-            self.conn.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_metadata (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
+    def setup_database(self):
+        """Initialize database schema"""
+        try:
+            with self._get_connection() as conn:
+                # Main results table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS analysis_results (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        file_path TEXT NOT NULL,
+                        page_number INTEGER,
+                        content_status TEXT NOT NULL,
+                        text_status TEXT,
+                        image_status TEXT,
+                        file_type TEXT NOT NULL,
+                        error_message TEXT,
+                        error_severity TEXT,
+                        relative_path TEXT,
+                        file_size INTEGER,
+                        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        batch_id INTEGER
+                    )
+                ''')
 
-            # Create analysis details table
-            self.conn.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_details (
-                    result_id INTEGER,
-                    detail_type TEXT,
-                    detail_key TEXT,
-                    detail_value TEXT,
-                    FOREIGN KEY(result_id) REFERENCES analysis_results(id)
-                )
-            ''')
+                # Analysis details table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS analysis_details (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        result_id INTEGER NOT NULL,
+                        category TEXT NOT NULL,
+                        detail_type TEXT NOT NULL,
+                        detail_value TEXT,
+                        numeric_value REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY(result_id) REFERENCES analysis_results(id) ON DELETE CASCADE
+                    )
+                ''')
 
-            # Store metadata
-            metadata = self.get_metadata_dict()
-            self.conn.executemany(
-                'INSERT OR REPLACE INTO analysis_metadata (key, value) VALUES (?, ?)',
-                [(k, json.dumps(v)) for k, v in metadata.items()]
-            )
+                # Processing stats table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS processing_stats (
+                        batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        start_time TIMESTAMP,
+                        end_time TIMESTAMP,
+                        records_processed INTEGER,
+                        success_count INTEGER,
+                        error_count INTEGER
+                    )
+                ''')
+
+                # Metadata table
+                conn.execute('''
+                    CREATE TABLE IF NOT EXISTS analysis_metadata (
+                        key TEXT NOT NULL,
+                        value TEXT,
+                        version INTEGER DEFAULT 1,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (key, version)
+                    )
+                ''')
+
+                # Create initial indexes
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_file_path ON analysis_results(file_path)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_content_status ON analysis_results(content_status)')
+                conn.execute('CREATE INDEX IF NOT EXISTS idx_details_result ON analysis_details(result_id)')
+
+                # Store initial metadata
+                self._store_metadata(conn)
+
+        except sqlite3.Error as e:
+            raise IOError(f"Failed to initialize SQLite database: {str(e)}")
+
+    def _store_metadata(self, conn: sqlite3.Connection):
+        """Store analysis metadata with versioning"""
+        metadata = self.get_metadata_dict()
+        metadata['total_records'] = self.row_count
+        metadata['completed_at'] = datetime.now().isoformat()
+
+        conn.executemany(
+            '''INSERT INTO analysis_metadata (key, value, version)
+               VALUES (?, ?, (SELECT COALESCE(MAX(version), 0) + 1 
+                            FROM analysis_metadata WHERE key = ?))''',
+            [(k, json.dumps(v), k) for k, v in metadata.items()]
+        )
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
         """Write a batch of results to SQLite database"""
-        if not batch:
+        if not batch and not is_final:
             return None
 
-        with self.conn:
-            # Insert main results
-            cursor = self.conn.executemany(
-                '''INSERT INTO analysis_results 
-                   (file_name, page_number, content_status, text_status, 
-                    image_status, file_type, processing_error)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                [(
-                    r['File'],
-                    int(r.get('Page', 1)) if r.get('Page') is not None else None,  # Ensure integer
-                    r['Content Status'],
-                    r.get('Text Status', ''),
-                    r.get('Image Status', ''),
-                    r.get('Type', 'Unknown'),
-                    r.get('Error', None)
-                ) for r in batch]
-            )
+        try:
+            with self.connection_lock:  # Ensure thread-safe database access
+                with self._get_connection() as conn:
+                    batch_start_time = datetime.now()
+                    success_count = 0
+                    error_count = 0
 
-            # Insert detailed analysis results if present
-            for result in batch:
-                if 'Analysis Details' in result:
-                    result_id = cursor.lastrowid
-                    details = result['Analysis Details']
-                    detail_records = []
+                    # Create batch record
+                    cursor = conn.execute('''
+                        INSERT INTO processing_stats (start_time, records_processed)
+                        VALUES (?, ?)
+                    ''', (batch_start_time, len(batch)))
+                    batch_id = cursor.lastrowid
 
-                    for detail_type, type_details in details.items():
-                        for key, value in type_details.items():
-                            detail_records.append((
-                                result_id,
-                                detail_type,
-                                key,
-                                str(value)
+                    # Process each result
+                    for result in batch:
+                        try:
+                            # Get file info
+                            rel_path = os.path.relpath(
+                                os.path.abspath(result['File']),
+                                os.path.dirname(self.output_path)
+                            )
+                            file_size = os.path.getsize(result['File']) if os.path.exists(result['File']) else 0
+
+                            # Insert main result
+                            cursor = conn.execute('''
+                                INSERT INTO analysis_results 
+                                (file_path, page_number, content_status, text_status,
+                                 image_status, file_type, error_message, error_severity,
+                                 relative_path, file_size, batch_id)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ''', (
+                                result['File'],
+                                result.get('Page', 1),
+                                result['Content Status'],
+                                result.get('Text Status', ''),
+                                result.get('Image Status', ''),
+                                result.get('Type', 'Unknown'),
+                                result.get('Error'),
+                                result.get('Error Severity'),
+                                rel_path,
+                                file_size,
+                                batch_id
                             ))
+                            result_id = cursor.lastrowid
 
-                    if detail_records:
-                        self.conn.executemany(
-                            '''INSERT INTO analysis_details 
-                               (result_id, detail_type, detail_key, detail_value)
-                               VALUES (?, ?, ?, ?)''',
-                            detail_records
-                        )
+                            # Process analysis details
+                            if 'Analysis Details' in result:
+                                details = []
+                                for category, values in result['Analysis Details'].items():
+                                    if isinstance(values, dict):
+                                        for key, value in values.items():
+                                            try:
+                                                numeric_value = float(str(value).replace('%', ''))
+                                            except (ValueError, TypeError):
+                                                numeric_value = None
+                                            details.append((
+                                                result_id,
+                                                category,
+                                                key,
+                                                str(value),
+                                                numeric_value
+                                            ))
+                                    else:
+                                        try:
+                                            numeric_value = float(str(values).replace('%', ''))
+                                        except (ValueError, TypeError):
+                                            numeric_value = None
+                                        details.append((
+                                            result_id,
+                                            category,
+                                            'value',
+                                            str(values),
+                                            numeric_value
+                                        ))
 
-        return self.output_path
+                                if details:
+                                    conn.executemany('''
+                                        INSERT INTO analysis_details 
+                                        (result_id, category, detail_type, detail_value, numeric_value)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    ''', details)
+
+                            success_count += 1
+                            self.row_count += 1
+
+                        except Exception as e:
+                            error_count += 1
+                            print(f"Error processing result: {str(e)}")
+
+                    # Update batch statistics
+                    conn.execute('''
+                        UPDATE processing_stats 
+                        SET end_time = ?, success_count = ?, error_count = ?
+                        WHERE batch_id = ?
+                    ''', (datetime.now(), success_count, error_count, batch_id))
+
+                    # Final operations
+                    if is_final:
+                        self._store_metadata(conn)
+                        self._create_final_indexes(conn)
+
+            return self.output_path
+
+        except sqlite3.Error as e:
+            raise IOError(f"Error writing to SQLite database: {str(e)}")
+
+    def _create_final_indexes(self, conn: sqlite3.Connection):
+        """Create additional indexes after all data is loaded"""
+        try:
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_processed_at ON analysis_results(processed_at)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_batch_id ON analysis_results(batch_id)')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_details_category ON analysis_details(category)')
+        except sqlite3.Error as e:
+            print(f"Warning: Failed to create final indexes: {str(e)}")
 
     def cleanup(self):
-        """Close the database connection"""
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        """Clean up resources"""
+        # No need to clean up connections as they're created and closed per operation
+        pass
 
 
 def create_output_handler(output_format: str, output_path: str, settings: 'AnalysisSettings') -> OutputHandler:
