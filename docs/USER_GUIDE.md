@@ -16,16 +16,12 @@
 - Minimum 4GB RAM (8GB recommended)
 - Screen resolution: 1024x768 or higher
 
-![System Requirements Check](images/system-check.png)
-*System requirements verification screen*
 
 ### Installation
 1. Extract the DocumentMarginAnalyzer package to your desired location
 2. No additional installation required - the software is portable
 3. Double-click DocumentMarginAnalyzer.exe to launch
 
-![Installation Location](images/install-location.png)
-*Recommended installation folder structure*
 
 ## Interface Overview
 
