@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# PyInstaller files
+*.spec
+*.manifest
+
+# Logs
+*.log
+logs/*.log
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Output files
+*.parquet
+*_metadata.json
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Project specific
+poppler-windows/
+temp_build_*/
+backup_build_*/
+build.*/
+dist.*/
+
+# Local development
+.env
+.coverage
+.pytest_cache/
+htmlcov/
