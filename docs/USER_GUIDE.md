@@ -8,7 +8,6 @@
 4. [Analysis Process](#analysis-process)
 5. [Output Understanding](#output-understanding)
 6. [Advanced Features](#advanced-features)
-7. [Troubleshooting](#troubleshooting)
 
 ## Getting Started
 
@@ -211,27 +210,6 @@ Threshold settings guide:
 ![Error Report](images/error-report.png)
 *Error report with categories and details*
 
-## Troubleshooting
-
-### Common Issues
-![Common Issues](images/common-issues.png)
-*Frequently encountered issues and solutions*
-
-### Error Messages
-![Error Messages](images/error-messages.png)
-*Common error messages and resolutions*
-
-### Warning Dialogs
-![Warning Dialogs](images/warning-dialogs.png)
-*Warning message examples and responses*
-
-## Version Information
-![Version Info](images/version-info.png)
-*Version information and update details*
-
-## About
-![About Dialog](images/about-dialog.png)
-*About dialog showing author and license information*
 
 ---
 
