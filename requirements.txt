@@ -6,3 +6,6 @@ numpy==1.26.2
 pyinstaller==6.3.0
 requests==2.32.0
 pyarrow==14.0.1
+markdown==3.5.1
+weasyprint==60.2
+pdfkit==1.0.0
