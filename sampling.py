@@ -206,7 +206,6 @@ class FileProcessor:
         scan_directory(abs_folder_path, current_depth)
         return sorted(files)  # Return sorted list of file paths
 
-
     @staticmethod
     def process_files_parallel(file_list: List[str],
                                processor: Callable[[str], Dict[str, Any]],
