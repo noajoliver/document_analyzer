@@ -261,15 +261,21 @@ with open('dist/version.json', 'w', encoding='utf-8') as f:
 # Create README in dist folder
 readme_content = '''Document Margin Analyzer
 
-This application analyzes PDF documents and images for content in header and footer areas.
+A Python application for analyzing PDF documents and images for content in header and footer margin areas.
 
 Features:
-- Configurable margin detection threshold (0.1-10.0%)
+- Advanced margin detection threshold (0.1-10.0%):
+  • 0.1-0.5%: High sensitivity
+  • 1.0%: Standard detection (recommended)
+  • 1.1-2.0%: Moderate tolerance
+  • 2.1-5.0%: Lower sensitivity
+  • 5.1-10.0%: Minimal sensitivity
 - Multiple output formats (CSV, Parquet, SQLite)
-- Statistical sampling for large document sets
+- Statistical sampling options for large document sets
+- Multi-threaded processing with configurable CPU cores
 - Comprehensive error handling and reporting
-- Multi-threaded processing
-- Progress tracking and detailed logging
+- Real-time progress tracking and detailed logging
+- Support for PDF and multiple image formats
 
 Requirements:
 - Windows 10 or later (for Windows version)
@@ -278,18 +284,23 @@ Requirements:
 Usage:
 1. Launch DocumentMarginAnalyzer.exe
 2. Configure analysis settings:
-   - Detection threshold (0.1-10.0%)
-   - Output format
-   - Optional statistical sampling
+   - Set detection threshold
+   - Choose output format
+   - Select file types (PDF/Images)
+   - Configure CPU core usage
+   - Enable optional sampling if needed
 3. Select input folder containing PDFs and/or images
 4. Choose save location for results
 5. Click "Start Analysis"
 
 Output:
 - Analysis results in chosen format (CSV/Parquet/SQLite)
-- Detailed processing report
+- Detailed processing report with statistics
 - Error report (if any errors occurred)
 - Processing logs in the logs directory
+
+© 2024 Noa J Oliver
+This program is free software under the GNU General Public License v3.0.
 
 For support, please report issues on the project repository.
 '''

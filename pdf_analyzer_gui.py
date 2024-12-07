@@ -240,6 +240,111 @@ class AnalysisSettings:
                 raise ValueError("Random N size cannot be larger than total files")
 
 
+class LicenseViewer:
+    def __init__(self, parent):
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("License Information")
+        self.dialog.geometry("600x400")
+        self.dialog.minsize(500, 300)
+
+        # Create notebook for tabs
+        self.notebook = ttk.Notebook(self.dialog)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Main license tab
+        main_frame = ttk.Frame(self.notebook)
+        self.notebook.add(main_frame, text="Main License")
+
+        main_text = scrolledtext.ScrolledText(
+            main_frame,
+            wrap=tk.WORD,
+            width=70,
+            height=20
+        )
+        main_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        main_text.insert(tk.END, """Document Margin Analyzer
+Copyright (C) 2024 Noa J Oliver
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see https://www.gnu.org/licenses/.""")
+        main_text.config(state=tk.DISABLED)
+
+        # Third-party licenses tab
+        third_party_frame = ttk.Frame(self.notebook)
+        self.notebook.add(third_party_frame, text="Third-Party Licenses")
+
+        third_party_text = scrolledtext.ScrolledText(
+            third_party_frame,
+            wrap=tk.WORD,
+            width=70,
+            height=20
+        )
+        third_party_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        third_party_text.insert(tk.END, """This software incorporates components from the following software packages:
+
+PyMuPDF (GPL v3)
+- A Python binding for MuPDF, a lightweight PDF and XPS viewer
+- https://github.com/pymupdf/PyMuPDF
+
+Poppler (GPL v2)
+- A PDF rendering library
+- https://poppler.freedesktop.org/
+
+pdf2image (MIT)
+- A python module that wraps the pdftoppm utility
+- https://github.com/Belval/pdf2image
+
+Pillow (HPND)
+- Python Imaging Library Fork
+- https://python-pillow.org/
+
+pandas (BSD 3-Clause)
+- Data analysis and manipulation tool
+- https://pandas.pydata.org/
+
+numpy (BSD 3-Clause)
+- Fundamental package for scientific computing
+- https://numpy.org/
+
+pyinstaller (Modified GPL with Exception)
+- Freezes Python applications into stand-alone executables
+- https://www.pyinstaller.org/
+
+requests (Apache 2.0)
+- HTTP library for Python
+- https://requests.readthedocs.io/
+
+pyarrow (Apache 2.0)
+- Python library for Apache Arrow
+- https://arrow.apache.org/
+
+Full license texts for these components can be found in their respective repositories.""")
+        third_party_text.config(state=tk.DISABLED)
+
+        # Close button
+        close_button = ttk.Button(
+            self.dialog,
+            text="Close",
+            command=self.dialog.destroy
+        )
+        close_button.pack(pady=10)
+
+        # Make dialog modal
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+        parent.wait_window(self.dialog)
+
+
 class DocumentAnalyzerGUI:
     """Main GUI application for document margin analysis"""
 
@@ -513,6 +618,35 @@ class DocumentAnalyzerGUI:
             # Ensure we don't prevent window from closing
             self.root.destroy()
 
+    def create_status_bar(self, parent: ttk.Frame) -> ttk.Frame:
+        """Create status bar with author and license information"""
+        status_bar = ttk.Frame(parent)
+
+        # Author information (left side)
+        author_label = ttk.Label(
+            status_bar,
+            text="© 2024 Noa J Oliver",
+            font=('Arial', 8)
+        )
+        author_label.grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+
+        # License link (right side)
+        license_link = ttk.Label(
+            status_bar,
+            text="License Information",
+            font=('Arial', 8, 'underline'),
+            foreground='blue',
+            cursor='hand2'
+        )
+        license_link.grid(row=0, column=1, padx=5, pady=2, sticky=tk.E)
+        license_link.bind('<Button-1>', lambda e: LicenseViewer(self.root))
+
+        # Configure grid weights
+        status_bar.columnconfigure(0, weight=1)
+        status_bar.columnconfigure(1, weight=0)
+
+        return status_bar
+
     def create_collapsible_section(self, parent: ttk.Frame, title: str, row: int,
                                    start_expanded: bool = True) -> tuple[ttk.Frame, ttk.Frame, ttk.Button]:
         """
@@ -553,8 +687,9 @@ class DocumentAnalyzerGUI:
                     current_x = self.root.winfo_x()
                     current_y = self.root.winfo_y()
 
-                    # Calculate new height with log section
+                    # Calculate new height with log section, accounting for status bar
                     log_height = 120  # Additional height for log section
+                    status_bar_height = 25  # Status bar height
                     new_height = current_height + log_height
 
                     # Ensure window stays within screen bounds
@@ -584,8 +719,10 @@ class DocumentAnalyzerGUI:
                     current_x = self.root.winfo_x()
                     current_y = self.root.winfo_y()
 
-                    # Restore original window height
-                    self.root.geometry(f"{current_width}x{720}+{current_x}+{current_y}")
+                    # Restore original window height, accounting for status bar
+                    base_height = 720
+                    total_height = base_height + 25  # Add status bar height
+                    self.root.geometry(f"{current_width}x{total_height}+{current_x}+{current_y}")
 
                     # Maintain button spacing
                     if hasattr(self, 'analyze_btn'):
@@ -726,15 +863,21 @@ class DocumentAnalyzerGUI:
         self.log_expanded = tk.BooleanVar(value=False)
         current_row += 1
 
-        # Control buttons at bottom
+        # Control buttons
         self.setup_control_buttons(self.main_frame, current_row)
+        current_row += 1
 
-        # Configure row weights to allow proper expansion
-        for i in range(current_row + 1):
+        # Status bar at the bottom
+        self.status_bar = self.create_status_bar(self.main_frame)
+        self.status_bar.grid(row=current_row, column=0, sticky=(tk.W, tk.E))
+        current_row += 1
+
+        # Configure row weights for proper expansion
+        for i in range(current_row):
             self.main_frame.rowconfigure(i, weight=0)  # Don't expand by default
 
         # Give weight to the row containing the log section to allow it to expand
-        log_row = current_row - 1  # The row where log section was added
+        log_row = current_row - 3  # The row where log section was added
         self.main_frame.rowconfigure(log_row, weight=1)
 
         # Set up initial window geometry
@@ -745,6 +888,10 @@ class DocumentAnalyzerGUI:
         # Calculate dimensions
         initial_width = 700
         initial_height = 720
+        status_bar_height = 25  # Height allocated for status bar
+
+        # Adjust total height
+        total_height = initial_height + status_bar_height
 
         # Get screen dimensions
         screen_width = self.root.winfo_screenwidth()
@@ -755,8 +902,8 @@ class DocumentAnalyzerGUI:
         top_y = 20
 
         # Set window geometry and constraints
-        self.root.geometry(f"{initial_width}x{initial_height}+{center_x}+{top_y}")
-        self.root.minsize(600, 680)
+        self.root.geometry(f"{initial_width}x{total_height}+{center_x}+{top_y}")
+        self.root.minsize(600, 680 + status_bar_height)  # Adjust minimum size too
 
     def setup_control_buttons(self, parent: ttk.Frame, row: int) -> None:
         """
