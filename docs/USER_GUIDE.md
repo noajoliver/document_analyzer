@@ -1,14 +1,12 @@
 # Document Margin Analyzer
-## Comprehensive User Guide
+## User Guide
 
 ## Table of Contents
 1. [Getting Started](#getting-started)
 2. [Interface Overview](#interface-overview)
 3. [Configuration Options](#configuration-options)
 4. [Analysis Process](#analysis-process)
-5. [Output Understanding](#output-understanding)
-6. [Advanced Features](#advanced-features)
-7. [Troubleshooting](#troubleshooting)
+5. [Troubleshooting](#troubleshooting)
 
 ## Getting Started
 
@@ -17,87 +15,41 @@
 - Minimum 4GB RAM (8GB recommended)
 - Screen resolution: 1024x768 or higher
 
-![System Requirements Check](images/system-check.png)
-*System requirements verification screen*
-
-### Installation
-1. Extract the DocumentMarginAnalyzer package to your desired location
-2. No additional installation required - the software is portable
-3. Double-click DocumentMarginAnalyzer.exe to launch
-
-![Installation Location](images/install-location.png)
-*Recommended installation folder structure*
-
 ## Interface Overview
 
 ### Main Application Window
 ![Main Application Interface](images/main-window.png)
-*The Document Margin Analyzer main interface with all sections collapsed*
+*The Document Margin Analyzer main interface showing all major sections*
 
 ### Analysis Settings Section
-![Analysis Settings Expanded](images/analysis-settings.png)
-*Analysis Settings section showing input and output configuration*
+![Analysis Settings](images/analysis-settings.png)
+*Analysis Settings section showing input/output configuration*
 
 #### Input Selection
 ![Input Folder Selection](images/input-selection.png)
 *Input folder browser and selection dialog*
 
-- **Input Folder**: Select the directory containing your documents
-  - Use Browse button to navigate
-  - Supports drag and drop
-  - Shows selected folder path
+#### File Types
+![File Type Selection](images/file-types.png)
+*File type selection with format details*
 
 #### Save Location
 ![Save Location Selection](images/save-location.png)
 *Save location configuration with format options*
 
-- **Save Location**: Choose where analysis results will be saved
-  - Automatic extension based on format
-  - Create new directory option
-  - Overwrite protection
-
-#### File Types
-![File Type Selection](images/file-types.png)
-*File type selection with format details*
-
-- **PDF Files**: 
-  - Supports single and multi-page documents
-  - Handles encrypted PDFs (with warning)
-  - Shows .pdf extension
-
-- **Image Files**:
-  - Supported formats shown in interface
-  - Format icons for visual reference
-  - File extension list: .jpg, .jpeg, .png, .bmp, .tiff, .tif
-
-### Analysis Configuration Section
-![Analysis Configuration Expanded](images/analysis-config.png)
-*Complete Analysis Configuration panel*
+### Analysis Configuration
+![Analysis Configuration](images/analysis-config.png)
+*Complete analysis configuration panel*
 
 #### Detection Threshold
 ![Threshold Configuration](images/threshold-config.png)
 *Threshold adjustment with sensitivity guide*
 
-Threshold settings guide:
-- 0.1-0.5%: Extremely sensitive
-  ![High Sensitivity Example](images/threshold-high.png)
-  *Example of high sensitivity detection*
-
-- 1.0%: Standard detection (recommended)
-  ![Standard Sensitivity Example](images/threshold-standard.png)
-  *Example of standard sensitivity detection*
-
+- 0.1-0.5%: Extremely sensitive, flags minimal content
+- 1.0%: Standard detection level (recommended)
 - 1.1-2.0%: Moderate tolerance
-  ![Moderate Sensitivity Example](images/threshold-moderate.png)
-  *Example of moderate sensitivity detection*
-
-- 2.1-5.0%: Lower sensitivity
-  ![Low Sensitivity Example](images/threshold-low.png)
-  *Example of low sensitivity detection*
-
-- 5.1-10.0%: Minimal sensitivity
-  ![Minimal Sensitivity Example](images/threshold-minimal.png)
-  *Example of minimal sensitivity detection*
+- 2.1-5.0%: Ignores minor marks
+- 5.1-10.0%: Only flags substantial content
 
 #### CPU Configuration
 ![CPU Core Selection](images/cpu-config.png)
@@ -111,132 +63,59 @@ Threshold settings guide:
 ![Sampling Options](images/sampling-options.png)
 *Statistical and Random sampling configuration*
 
-##### Statistical Sampling
-![Statistical Sampling Setup](images/statistical-sampling.png)
-*Statistical sampling configuration panel*
-
-- Confidence Level selection
-- Margin of Error adjustment
-- Sample size calculation
-
-##### Random N Sampling
-![Random Sampling Setup](images/random-sampling.png)
-*Random N sampling configuration panel*
-
-- Sample size input
-- Population display
-- Random seed option
-
-### Output Configuration Section
-![Output Configuration Expanded](images/output-config.png)
+### Output Configuration
+![Output Settings](images/output-config.png)
 *Output Configuration with all options*
 
-#### Format Selection
-![Output Format Options](images/output-formats.png)
-*Available output format options*
-
-- CSV Configuration
-  ![CSV Options](images/csv-options.png)
-  *CSV-specific settings*
-
-- Parquet Configuration
-  ![Parquet Options](images/parquet-options.png)
-  *Parquet-specific settings*
-
-- SQLite Configuration
-  ![SQLite Options](images/sqlite-options.png)
-  *SQLite-specific settings*
-
-### Progress Section
-![Progress Section Expanded](images/progress-section.png)
+### Progress Monitoring
+![Progress Section](images/progress-section.png)
 *Progress tracking with all metrics*
 
-#### Progress Bar
-![Progress Indicators](images/progress-indicators.png)
-*Detailed progress indicators and metrics*
-
-#### Processing Statistics
-![Processing Stats](images/processing-stats.png)
-*Real-time processing statistics display*
-
-### Log Section
-![Log Section Expanded](images/log-section.png)
+### Log View
+![Log Section](images/log-section.png)
 *Log section showing processing details*
-
-#### Log Display
-![Log Details](images/log-details.png)
-*Detailed log entries with timestamps*
 
 ## Analysis Process
 
-### Starting Analysis
-![Start Analysis](images/start-analysis.png)
-*Analysis startup configuration confirmation*
+1. Configure Input/Output
+   - Select input folder containing documents
+   - Choose save location
+   - Select file types to process (PDF/Images)
 
-### During Processing
-![Processing State](images/processing-state.png)
-*Active processing with controls*
+2. Configure Analysis Settings
+   - Set detection threshold (0.1-10.0%)
+   - Configure CPU cores
+   - Enable sampling if needed
+   - Select output format
 
-#### Control Options
-![Control Buttons](images/control-buttons.png)
-*Available control buttons during processing*
+3. Start Analysis
+   - Click "Start Analysis"
+   - Monitor progress
+   - View log for details
 
-### Completion
-![Analysis Complete](images/analysis-complete.png)
-*Analysis completion summary*
-
-## Output Understanding
-
-### Results Overview
-![Results Summary](images/results-summary.png)
-*Summary of analysis results*
-
-### CSV Output
-![CSV Results](images/csv-results.png)
-*Example CSV output format*
-
-### Parquet Output
-![Parquet Results](images/parquet-results.png)
-*Parquet output structure*
-
-### SQLite Output
-![SQLite Results](images/sqlite-results.png)
-*SQLite database structure and contents*
-
-### Processing Report
-![Processing Report](images/processing-report.png)
-*Detailed processing report example*
-
-### Error Report
-![Error Report](images/error-report.png)
-*Error report with categories and details*
+4. Review Results
+   - Check output files
+   - Review processing report
+   - Address any errors
 
 ## Troubleshooting
 
 ### Common Issues
-![Common Issues](images/common-issues.png)
-*Frequently encountered issues and solutions*
+1. File Access
+   - Verify folder permissions
+   - Check file availability
+   - Ensure files aren't in use
 
-### Error Messages
-![Error Messages](images/error-messages.png)
-*Common error messages and resolutions*
+2. Performance
+   - Adjust CPU core usage
+   - Enable sampling for large datasets
+   - Check available disk space
 
-### Warning Dialogs
-![Warning Dialogs](images/warning-dialogs.png)
-*Warning message examples and responses*
-
-## Version Information
-![Version Info](images/version-info.png)
-*Version information and update details*
+3. Output Issues
+   - Verify write permissions
+   - Ensure sufficient disk space
+   - Check file format compatibility
 
 ## About
-![About Dialog](images/about-dialog.png)
-*About dialog showing author and license information*
-
----
-
-# Image Credits
-All screenshots are from Document Margin Analyzer version 2.0
 © 2024 Noa J Oliver
-
 This program is free software under the GNU General Public License v3.0.
