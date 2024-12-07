@@ -32,6 +32,151 @@ from pdf_utils import setup_poppler
 
 
 @dataclass
+class ProcessingStats:
+    """Tracks processing statistics and timing"""
+    total_processed: int = 0
+    successful: int = 0
+    failed: int = 0
+    start_time: Optional[float] = None
+    last_update_time: Optional[float] = None
+    recent_rates: List[float] = field(default_factory=lambda: [])
+    pause_time: Optional[float] = None
+    total_pause_duration: float = 0.0
+
+    def start(self):
+        """Start or restart processing timer"""
+        self.start_time = time.time()
+        self.last_update_time = self.start_time
+        self.recent_rates.clear()
+        self.total_pause_duration = 0.0
+        self.pause_time = None
+
+    def pause(self):
+        """Record pause start time"""
+        if not self.pause_time:
+            self.pause_time = time.time()
+
+    def resume(self):
+        """Calculate and add pause duration"""
+        if self.pause_time:
+            self.total_pause_duration += time.time() - self.pause_time
+            self.pause_time = None
+            self.last_update_time = time.time()
+
+    def update(self, processed_count: int):
+        """
+        Update processing stats and calculate rate
+
+        Args:
+            processed_count: Current number of processed items
+        """
+        if self.pause_time:  # Don't update while paused
+            return
+
+        try:
+            current_time = time.time()
+            if self.last_update_time:
+                time_diff = current_time - self.last_update_time
+                if time_diff > 0:
+                    # Calculate items processed since last update
+                    items_diff = processed_count - self.total_processed
+                    current_rate = items_diff / time_diff
+
+                    # Keep track of recent processing rates (last 5 updates)
+                    self.recent_rates.append(current_rate)
+                    if len(self.recent_rates) > 5:
+                        self.recent_rates.pop(0)
+
+            self.total_processed = processed_count
+            self.last_update_time = current_time
+        except Exception as e:
+            print(f"Error updating processing stats: {str(e)}")
+
+    def get_elapsed_time(self) -> str:
+        """
+        Get elapsed time as formatted string, excluding pause time
+
+        Returns:
+            str: Formatted elapsed time (HH:MM:SS)
+        """
+        try:
+            if not self.start_time:
+                return "00:00:00"
+
+            # Calculate total elapsed time minus pauses
+            elapsed = time.time() - self.start_time - self.total_pause_duration
+            if self.pause_time:  # Subtract current pause if paused
+                elapsed -= (time.time() - self.pause_time)
+
+            elapsed = int(max(0, elapsed))  # Ensure non-negative
+            hours = elapsed // 3600
+            minutes = (elapsed % 3600) // 60
+            seconds = elapsed % 60
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        except Exception as e:
+            print(f"Error calculating elapsed time: {str(e)}")
+            return "00:00:00"
+
+    def get_estimated_time_remaining(self, total_files: int) -> str:
+        """
+        Calculate and format estimated time remaining
+
+        Args:
+            total_files: Total number of files to process
+
+        Returns:
+            str: Formatted time remaining estimate
+        """
+        try:
+            if (not self.start_time or not self.recent_rates or
+                    self.total_processed == 0 or self.pause_time):
+                return "Calculating..."
+
+            # Use average of recent processing rates
+            avg_rate = sum(self.recent_rates) / len(self.recent_rates)
+            if avg_rate <= 0:
+                return "Calculating..."
+
+            remaining_files = total_files - self.total_processed
+            estimated_seconds = remaining_files / avg_rate
+
+            # Format time remaining
+            hours = int(estimated_seconds // 3600)
+            minutes = int((estimated_seconds % 3600) // 60)
+            seconds = int(estimated_seconds % 60)
+
+            # Choose appropriate format based on duration
+            if hours > 0:
+                return f"{hours}h {minutes}m remaining"
+            elif minutes > 0:
+                return f"{minutes}m {seconds}s remaining"
+            else:
+                return f"{seconds}s remaining"
+        except Exception as e:
+            print(f"Error calculating time remaining: {str(e)}")
+            return "Calculating..."
+
+    def get_processing_rate(self) -> str:
+        """
+        Get current processing rate
+
+        Returns:
+            str: Formatted processing rate (files/second)
+        """
+        try:
+            if not self.recent_rates:
+                return "0 files/sec"
+
+            avg_rate = sum(self.recent_rates) / len(self.recent_rates)
+            if avg_rate >= 10:
+                return f"{avg_rate:.0f} files/sec"
+            return f"{avg_rate:.1f} files/sec"
+        except Exception as e:
+            print(f"Error calculating processing rate: {str(e)}")
+            return "0 files/sec"
+
+
+@dataclass
 class AnalysisSettings:
     """Configuration settings for document analysis"""
     threshold: float
@@ -1093,7 +1238,7 @@ class DocumentAnalyzerGUI:
         progress_frame = ttk.Frame(parent)
         progress_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5)
 
-        # Progress bar
+        # Progress bar with original styling
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(
             progress_frame,
@@ -1107,16 +1252,45 @@ class DocumentAnalyzerGUI:
             padx=5, pady=5
         )
 
-        # Status label
+        # Time information frame
+        time_frame = ttk.Frame(progress_frame)
+        time_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), padx=5, pady=(0, 2))
+
+        # Elapsed time (left side)
+        self.elapsed_var = tk.StringVar(value="Elapsed: 00:00:00")
+        ttk.Label(
+            time_frame,
+            textvariable=self.elapsed_var,
+            font=('Arial', 9)
+        ).grid(row=0, column=0, sticky=tk.W)
+
+        # Remaining time (right side)
+        self.remaining_var = tk.StringVar(value="Remaining: Calculating...")
+        ttk.Label(
+            time_frame,
+            textvariable=self.remaining_var,
+            font=('Arial', 9)
+        ).grid(row=0, column=1, sticky=tk.E)
+
+        # Processing rate
+        self.rate_var = tk.StringVar(value="0 files/sec")
+        ttk.Label(
+            time_frame,
+            textvariable=self.rate_var,
+            font=('Arial', 9)
+        ).grid(row=1, column=0, columnspan=2, sticky=tk.W)
+
+        # Status label with original styling
         self.status_label = ttk.Label(progress_frame, text="")
         self.status_label.grid(
-            row=1, column=0,
+            row=2, column=0,
             sticky=(tk.W, tk.E),
             padx=5, pady=(0, 5)
         )
 
-        # Configure grid weights
+        # Configure grid weights to match original
         progress_frame.columnconfigure(0, weight=1)
+        time_frame.columnconfigure((0, 1), weight=1)  # Equal weight for elapsed and remaining time
 
     def setup_log_section(self, parent: ttk.Frame) -> None:
         """Setup log display section"""
@@ -2114,11 +2288,14 @@ class DocumentAnalyzerGUI:
                     self.settings
                 )
                 self.log_message(f"Initialized {self.settings.output_format.upper()} output handler")
-
             except Exception as e:
                 raise RuntimeError(f"Failed to initialize output handler: {str(e)}")
 
-            # Initialize processing
+            # Initialize processing stats
+            self.processing_stats = ProcessingStats()
+            self.processing_stats.start()
+
+            # Initialize processing state
             self.processing = True
             self.current_file_number = 1
             self.total_rows_written = 0
@@ -2135,6 +2312,9 @@ class DocumentAnalyzerGUI:
 
             # Reset progress indicators
             self.progress_var.set(0)
+            self.elapsed_var.set("Elapsed: 00:00:00")
+            self.remaining_var.set("Remaining: Calculating...")
+            self.rate_var.set("0 files/sec")
             self.status_label.config(text="Starting analysis...")
             self.log_text.delete(1.0, tk.END)
 
@@ -2301,7 +2481,24 @@ class DocumentAnalyzerGUI:
                             case "log":
                                 self.update_log(msg_data)
                             case "progress":
+                                # Update progress bar
                                 self.update_progress_bar(msg_data)
+
+                                # Update processing stats and timing info
+                                if hasattr(self, 'processing_stats'):
+                                    processed_count = int(msg_data * self.settings.total_files / 100)
+                                    self.processing_stats.update(processed_count)
+
+                                    # Update timing displays
+                                    self.elapsed_var.set(
+                                        f"Elapsed: {self.processing_stats.get_elapsed_time()}"
+                                    )
+                                    self.remaining_var.set(
+                                        f"Remaining: {self.processing_stats.get_estimated_time_remaining(self.settings.total_files)}"
+                                    )
+                                    self.rate_var.set(
+                                        self.processing_stats.get_processing_rate()
+                                    )
                             case "status":
                                 self.update_status(msg_data)
                             case "complete":
@@ -2324,6 +2521,7 @@ class DocumentAnalyzerGUI:
             self.handle_ui_error(e)
         finally:
             if self.processing:
+                # Schedule next update
                 self.root.after(100, self.update_ui)
 
     def update_ui_state(self, analyzing: bool):
@@ -2489,16 +2687,21 @@ class DocumentAnalyzerGUI:
             messagebox.showerror("Error", f"Error selecting save location: {str(e)}")
 
     def toggle_pause(self) -> None:
-        """Toggle pause state of analysis"""
+        """Toggle pause state of analysis and update timing"""
         try:
             if self.pause_event.is_set():
+                # Resuming
                 self.pause_event.clear()
                 self.pause_btn.configure(text="Pause")
                 self.log_message("Analysis resumed")
+                self.processing_stats.resume()
             else:
+                # Pausing
                 self.pause_event.set()
                 self.pause_btn.configure(text="Resume")
                 self.log_message("Analysis paused")
+                self.processing_stats.pause()
+
         except Exception as e:
             self.handle_ui_error(e)
             self.pause_event.clear()  # Ensure we don't get stuck in paused state
