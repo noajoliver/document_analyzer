@@ -2704,7 +2704,7 @@ class DocumentAnalyzerGUI:
 
         except Exception as e:
             self.handle_ui_error(e)
-            self.pause_event.clear()  # Ensure we don't get stuck in paused state
+            self.pause_event.clear()
 
     def stop_analysis(self) -> None:
         """Stop the analysis process with user confirmation"""

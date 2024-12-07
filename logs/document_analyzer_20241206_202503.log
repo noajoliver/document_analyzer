@@ -1,0 +1,44 @@
+2024-12-06 20:25:26,062 - ERROR - File: batch processing
+Page: N/A
+Category: Unknown Error
+Severity: ERROR
+Message: Error writing Parquet batch: Error processing batch: ("Expected bytes, got a 'dict' object", 'Conversion failed for column Analysis Details with type object')
+Details: Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 237, in _process_batch
+    table = pa.Table.from_pandas(df, schema=self.schema)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow\\table.pxi", line 3869, in pyarrow.lib.Table.from_pandas
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\pyarrow\pandas_compat.py", line 613, in dataframe_to_arrays
+    arrays = [convert_column(c, f)
+              ^^^^^^^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\pyarrow\pandas_compat.py", line 600, in convert_column
+    raise e
+  File "C:\PycharmProjects\DAV\.venv\Lib\site-packages\pyarrow\pandas_compat.py", line 594, in convert_column
+    result = pa.array(col, type=type_, from_pandas=True, safe=safe)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow\\array.pxi", line 340, in pyarrow.lib.array
+  File "pyarrow\\array.pxi", line 86, in pyarrow.lib._ndarray_to_array
+  File "pyarrow\\error.pxi", line 91, in pyarrow.lib.check_status
+pyarrow.lib.ArrowTypeError: ("Expected bytes, got a 'dict' object", 'Conversion failed for column Analysis Details with type object')
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 264, in write_batch
+    table = self._process_batch(self.temp_batches)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 245, in _process_batch
+    raise ValueError(f"Error processing batch: {str(e)}")
+ValueError: Error processing batch: ("Expected bytes, got a 'dict' object", 'Conversion failed for column Analysis Details with type object')
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\PycharmProjects\document_analyzer\pdf_analyzer_gui.py", line 1422, in process_files
+    self.current_output_handler.write_batch(results, True)
+  File "C:\PycharmProjects\document_analyzer\output_handlers.py", line 279, in write_batch
+    raise IOError(f"Error writing Parquet batch: {str(e)}")
+OSError: Error writing Parquet batch: Error processing batch: ("Expected bytes, got a 'dict' object", 'Conversion failed for column Analysis Details with type object')
+
+Timestamp: 2024-12-06T20:25:03.541037
+--------------------------------------------------------------------------------

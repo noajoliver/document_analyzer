@@ -148,35 +148,117 @@ class CSVOutputHandler(OutputHandler):
         self.total_rows_written += current_batch_size
         return output_file
 
+
 class ParquetOutputHandler(OutputHandler):
-    """Handles output in Parquet format"""
+    """Handles output in Parquet format with support for nested data structures"""
 
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.output_path = f"{os.path.splitext(output_path)[0]}.parquet"
-        self.all_data = []
+        self.schema = None
+        self.writer = None
+        self.row_group_size = 100000
+        self.temp_batches = []
+        self.batch_size = 10000
+
+    def _flatten_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """Flatten nested dictionary structures and handle special fields"""
+        flattened = {}
+
+        for key, value in record.items():
+            if key == 'Analysis Details':
+                if isinstance(value, dict):
+                    # Flatten nested Analysis Details structure
+                    for category, details in value.items():
+                        if isinstance(details, dict):
+                            for detail_key, detail_value in details.items():
+                                flat_key = f"{category}_{detail_key}".replace(" ", "_")
+                                flattened[flat_key] = detail_value
+                        else:
+                            flattened[category] = str(details)
+            else:
+                # Handle other fields
+                if isinstance(value, (str, int, float, bool, type(None))):
+                    flattened[key] = value
+                else:
+                    flattened[key] = str(value)
+
+        return flattened
+
+    def _flatten_batch(self, batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Flatten entire batch of records"""
+        return [self._flatten_record(record) for record in batch]
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
-        """Accumulate data and write to Parquet file on final batch"""
-        self.all_data.extend(batch)
+        """Write a batch of results to Parquet file"""
+        if not batch and not is_final:
+            return None
 
-        if is_final:
-            df = pd.DataFrame(self.all_data)
+        try:
+            # Flatten the batch data
+            flattened_batch = self._flatten_batch(batch)
+
+            # Convert to DataFrame
+            df = pd.DataFrame(flattened_batch)
+
+            # Convert any remaining object columns to string
+            for col in df.select_dtypes(include=['object']).columns:
+                df[col] = df[col].astype(str)
+
+            # Special handling for Page column
             if 'Page' in df.columns:
-                df['Page'] = df['Page'].astype('Int64')  # Use nullable integer type
+                df['Page'] = pd.to_numeric(df['Page'], errors='coerce').astype('Int32')
 
-            table = pa.Table.from_pandas(df)
+            # Write to parquet
+            if not os.path.exists(self.output_path):
+                # First write - create new file
+                df.to_parquet(
+                    self.output_path,
+                    engine='pyarrow',
+                    compression='snappy',
+                    index=False
+                )
+            else:
+                # Append to existing file
+                existing_df = pd.read_parquet(self.output_path)
+                combined_df = pd.concat([existing_df, df], ignore_index=True)
+                combined_df.to_parquet(
+                    self.output_path,
+                    engine='pyarrow',
+                    compression='snappy',
+                    index=False
+                )
 
-            # Convert metadata to strings for Parquet compatibility
-            metadata = {k: str(v) for k, v in self.get_metadata_dict().items()}
+            if is_final:
+                self._write_metadata()
 
-            pq.write_table(
-                table,
-                self.output_path,
-                metadata=metadata
-            )
-            return self.output_path
-        return None
+            return self.output_path if is_final else None
+
+        except Exception as e:
+            raise IOError(f"Error writing Parquet batch: {str(e)}")
+
+    def _write_metadata(self):
+        """Write analysis metadata to companion JSON file"""
+        try:
+            metadata_path = f"{os.path.splitext(self.output_path)[0]}_metadata.json"
+            metadata = self.get_metadata_dict()
+
+            # Add Parquet-specific metadata
+            metadata.update({
+                'row_group_size': self.row_group_size,
+                'compression': 'snappy',
+                'created_at': datetime.now().isoformat()
+            })
+
+            with open(metadata_path, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, indent=2)
+
+        except Exception as e:
+            print(f"Warning: Failed to write metadata file: {str(e)}")
+
+    def cleanup(self):
+        """Clean up resources"""
+        pass  # No cleanup needed for this implementation
 
 
 class SQLiteOutputHandler(OutputHandler):
