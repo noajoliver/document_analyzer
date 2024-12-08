@@ -50,7 +50,7 @@ def clean_build():
         'build',
         'dist',
         '__pycache__',
-        'pdf_analyzer.spec',  # Specific spec file
+        'document_analyzer.spec',  # Specific spec file
         '*.pyc',
         '*.pyo',
         '*.pyd',
@@ -161,7 +161,7 @@ def verify_clean():
     critical_paths = [
         'build',
         'dist',
-        'pdf_analyzer.spec',
+        'document_analyzer.spec',
         'poppler-windows',
         '.venv',
         'temp_build_*',

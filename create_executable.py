@@ -32,7 +32,7 @@ def cleanup_old_files():
     print("Cleaning up old build files...")
 
     cleanup_paths = [
-        'pdf_analyzer.spec',
+        'document_analyzer.spec',
         'build',
         'dist',
         '__pycache__',
@@ -447,7 +447,7 @@ def main():
             return 1
 
         print("\nStep 6: Running PyInstaller...")
-        success, output = run_command("pyinstaller pdf_analyzer.spec")
+        success, output = run_command("pyinstaller document_analyzer.spec")
         if not success:
             print(f"Error during PyInstaller execution: {output}")
             print("PyInstaller Output:")

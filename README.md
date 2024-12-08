@@ -64,7 +64,7 @@ To build the executable:
    ```
 3. Build executable:
    ```bash
-   pyinstaller pdf_analyzer.spec
+   pyinstaller document_analyzer.spec
    ```
 
 ## License

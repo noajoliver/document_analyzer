@@ -314,7 +314,7 @@ if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
 """
 
-    with open('pdf_analyzer.spec', 'w', encoding='utf-8') as f:
+    with open('document_analyzer.spec', 'w', encoding='utf-8') as f:
         f.write(spec_content)
     print("Created PyInstaller spec file with Poppler configuration")
 
@@ -341,7 +341,7 @@ def cleanup_old_files():
     print("Cleaning up old build files...")
 
     cleanup_paths = [
-        'pdf_analyzer.spec',
+        'document_analyzer.spec',
         'build',
         'dist',
         '__pycache__',
@@ -450,7 +450,7 @@ def main():
     print("\n1. First install requirements:")
     print("   pip install -r requirements.txt")
     print("\n2. Then run PyInstaller:")
-    print("   pyinstaller pdf_analyzer.spec")
+    print("   pyinstaller document_analyzer.spec")
 
     if platform.system() == "Windows":
         print("\nNote: The executable will be created in the 'dist' folder as 'DocumentMarginAnalyzer.exe'")
