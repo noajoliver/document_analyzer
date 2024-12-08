@@ -25,7 +25,6 @@ import venv
 from pathlib import Path
 from typing import Optional, Tuple
 from datetime import datetime
-from markdown_converter import convert_project_docs
 
 
 def cleanup_old_files():
@@ -133,27 +132,6 @@ def create_temp_build_dir() -> str:
     print(f"Created temporary build directory: {build_dir}")
     return build_dir
 
-def generate_documentation(project_root: str, dist_dir: str) -> None:
-    """Generate PDF documentation from markdown files"""
-    try:
-        print("\nGenerating PDF documentation...")
-        docs_dir = os.path.join(dist_dir, 'docs')
-        os.makedirs(docs_dir, exist_ok=True)
-
-        # Convert documentation
-        generated_pdfs = convert_project_docs(project_root, docs_dir)
-
-        if generated_pdfs:
-            print(f"Generated {len(generated_pdfs)} documentation PDFs:")
-            for pdf in generated_pdfs:
-                print(f"  - {os.path.basename(pdf)}")
-        else:
-            print("No documentation PDFs were generated")
-
-    except Exception as e:
-        print(f"Warning: Failed to generate documentation: {str(e)}")
-        print("Continuing with build process...")
-
 def backup_successful_build(dist_dir: str) -> Optional[str]:
     """
     Create a backup of a successful build
@@ -191,7 +169,6 @@ def copy_required_files(source_dir: str, temp_dir: str):
         'sampling.py',
         'pdf_utils.py',
         'build_config.py',
-        'markdown_converter.py',
         'README.md',
         'requirements.txt',
         'clean_rebuild.py'
@@ -432,7 +409,6 @@ def main():
     original_dir = os.path.abspath(os.getcwd())
     temp_dir = None
     backup_dir = None
-    docs_dir = None
 
     try:
         # Run clean_rebuild first
@@ -478,34 +454,14 @@ def main():
             print(output)
             return 1
 
-        # Generate documentation
-        print("\nStep 7: Generating documentation...")
-        try:
-            docs_dir = os.path.join(temp_dir, "dist", "docs")
-            os.makedirs(docs_dir, exist_ok=True)
-
-            # Convert documentation files
-            generated_pdfs = convert_project_docs(original_dir, docs_dir)
-
-            if generated_pdfs:
-                print(f"Successfully generated {len(generated_pdfs)} documentation PDFs:")
-                for pdf in generated_pdfs:
-                    print(f"  - {os.path.basename(pdf)}")
-            else:
-                print("No documentation PDFs were generated")
-
-        except Exception as doc_error:
-            print(f"Warning: Documentation generation failed: {str(doc_error)}")
-            print("Continuing with build process...")
-
         # Verify build
-        print("\nStep 8: Verifying build...")
+        print("\nStep 7: Verifying build...")
         if not verify_build(original_dir, os.path.join(temp_dir, "dist")):
             print("Build verification failed.")
             return 1
 
         # Move distribution to original directory
-        print("\nStep 9: Moving build artifacts...")
+        print("\nStep 8: Moving build artifacts...")
         final_dist = os.path.join(original_dir, "dist")
         if os.path.exists(final_dist):
             shutil.rmtree(final_dist)
@@ -515,25 +471,10 @@ def main():
         # Create backup of successful build
         backup_dir = backup_successful_build(final_dist)
 
-        # Print summary of documentation
-        if os.path.exists(os.path.join(final_dist, "docs")):
-            print("\nDocumentation Summary:")
-            doc_files = os.listdir(os.path.join(final_dist, "docs"))
-            if doc_files:
-                print("Generated documentation files:")
-                for doc in doc_files:
-                    print(f"  - {doc}")
-            else:
-                print("No documentation files were generated")
-
         print("\nBuild completed successfully!")
         print(f"Executable can be found in: {final_dist}")
         if backup_dir:
             print(f"Backup created in: {backup_dir}")
-
-        # Verify documentation in backup
-        if backup_dir and os.path.exists(os.path.join(backup_dir, "docs")):
-            print("Documentation included in backup")
 
         return 0
 
@@ -554,15 +495,6 @@ def main():
                 print(f"\nCleaned up temporary build directory: {temp_dir}")
             except Exception as e:
                 print(f"Warning: Failed to clean up temporary directory {temp_dir}: {str(e)}")
-
-        # Additional cleanup for documentation artifacts
-        try:
-            temp_docs = os.path.join(temp_dir, "docs") if temp_dir else None
-            if temp_docs and os.path.exists(temp_docs):
-                shutil.rmtree(temp_docs)
-        except Exception as e:
-            print(f"Warning: Failed to clean up temporary documentation: {str(e)}")
-
 
 if __name__ == "__main__":
     sys.exit(main())
