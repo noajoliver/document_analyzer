@@ -182,7 +182,7 @@ for module in module_files:
         data_files.append((module, '.'))
 
 a = Analysis(
-    ['pdf_analyzer_gui.py'],
+    ['document_analyzer_gui.py'],
     pathex=[],
     binaries=POPPLER_DATA,
     datas=data_files,
@@ -380,7 +380,7 @@ def check_python_version():
 def verify_module_files():
     """Verify that all required module files are present."""
     required_files = [
-        'pdf_analyzer_gui.py',
+        'document_analyzer_gui.py',
         'content_analyzer.py',
         'error_handling.py',
         'output_handlers.py',

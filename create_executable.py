@@ -162,7 +162,7 @@ def copy_required_files(source_dir: str, temp_dir: str):
         temp_dir: Temporary build directory to copy files to
     """
     required_files = [
-        'pdf_analyzer_gui.py',
+        'document_analyzer_gui.py',
         'content_analyzer.py',
         'error_handling.py',
         'output_handlers.py',

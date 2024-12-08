@@ -36,7 +36,7 @@ An application for analyzing PDF documents and images for content in header and 
 ## Usage
 1. Launch the application:
    ```bash
-   python pdf_analyzer_gui.py
+   python document_analyzer_gui.py
    ```
 2. Configure analysis settings:
    - Set detection threshold (1-20%)
