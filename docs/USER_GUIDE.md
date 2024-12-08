@@ -29,13 +29,13 @@
 ![Input Folder Selection](images/input-selection.png)
 *Input folder browser and selection dialog*
 
-#### File Types
-![File Type Selection](images/file-types.png)
-*File type selection with format details*
-
 #### Save Location
 ![Save Location Selection](images/save-location.png)
 *Save location configuration with format options*
+
+#### File Types
+![File Type Selection](images/file-types.png)
+*File type selection with format details*
 
 ### Analysis Configuration
 ![Analysis Configuration](images/analysis-config.png)
