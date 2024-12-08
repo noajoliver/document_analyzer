@@ -19,31 +19,24 @@
 
 ### Main Application Window
 ![Main Application Interface](images/main-window.png)
-*The Document Margin Analyzer main interface showing all major sections*
 
 ### Analysis Settings Section
 ![Analysis Settings](images/analysis-settings.png)
-*Analysis Settings section showing input/output configuration*
 
 #### Input Selection
 ![Input Folder Selection](images/input-selection.png)
-*Input folder browser and selection dialog*
 
 #### Save Location
 ![Save Location Selection](images/save-location.png)
-*Save location configuration with format options*
 
 #### File Types
 ![File Type Selection](images/file-types.png)
-*File type selection with format details*
 
 ### Analysis Configuration
 ![Analysis Configuration](images/analysis-config.png)
-*Complete analysis configuration panel*
 
 #### Detection Threshold
 ![Threshold Configuration](images/threshold-config.png)
-*Threshold adjustment with sensitivity guide*
 
 - 0.1-0.5%: Extremely sensitive, flags minimal content
 - 1.0%: Standard detection level (recommended)
@@ -53,7 +46,6 @@
 
 #### CPU Configuration
 ![CPU Core Selection](images/cpu-config.png)
-*CPU core selection with system information*
 
 - Shows available cores
 - Recommended settings
@@ -61,19 +53,15 @@
 
 #### Sampling Configuration
 ![Sampling Options](images/sampling-options.png)
-*Statistical and Random sampling configuration*
 
 ### Output Configuration
 ![Output Settings](images/output-config.png)
-*Output Configuration with all options*
 
 ### Progress Monitoring
 ![Progress Section](images/progress-section.png)
-*Progress tracking with all metrics*
 
 ### Log View
 ![Log Section](images/log-section.png)
-*Log section showing processing details*
 
 ## Analysis Process
 
