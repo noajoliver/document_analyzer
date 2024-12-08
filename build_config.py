@@ -17,6 +17,7 @@ import os
 import platform
 import shutil
 import sys
+import traceback
 import zipfile
 from pathlib import Path
 
@@ -66,47 +67,88 @@ def verify_dependencies():
     print("\nAll dependencies verified successfully!")
     return True
 
+
 def download_poppler():
     """Download and set up Poppler based on the operating system."""
-
     if platform.system() == "Windows":
         # Download Poppler for Windows
-        poppler_url = \
-            "https://github.com/oschwartz10612/poppler-windows/releases/download/v23.08.0-0/Release-23.08.0-0.zip"
+        poppler_url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v23.08.0-0/Release-23.08.0-0.zip"
         poppler_dir = "poppler-windows"
 
         if not os.path.exists(poppler_dir):
             print("Downloading Poppler for Windows...")
             try:
-                response = requests.get(poppler_url, timeout=30)
-                response.raise_for_status()
+                # Add timeout and better error handling for download
+                print(f"Downloading from: {poppler_url}")
+                response = requests.get(poppler_url, timeout=60,
+                                        headers={'User-Agent': 'Mozilla/5.0'})
+
+                if response.status_code != 200:
+                    print(f"Error downloading Poppler: HTTP Status {response.status_code}")
+                    print("Please download Poppler manually:")
+                    print("1. Download from:", poppler_url)
+                    print("2. Create 'poppler-windows' directory")
+                    print("3. Extract the downloaded zip there")
+                    return None
+
                 zip_path = "poppler.zip"
+                print(f"Saving to: {zip_path}")
 
                 with open(zip_path, 'wb') as f:
                     f.write(response.content)
+                print("Download complete, extracting files...")
 
-                with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    zip_ref.extractall(poppler_dir)
+                # Extract with error handling
+                try:
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(poppler_dir)
+                    print("Extraction complete")
+                except zipfile.BadZipFile:
+                    print("Error: Downloaded file is not a valid zip file")
+                    if os.path.exists(zip_path):
+                        os.remove(zip_path)
+                    return None
 
-                os.remove(zip_path)
+                # Clean up zip file
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                    print("Cleaned up temporary zip file")
 
                 # Verify the binary path exists
                 bin_path = os.path.join(poppler_dir, 'poppler-23.08.0', 'Library', 'bin')
                 if os.path.exists(bin_path):
-                    print(f"Poppler downloaded and extracted successfully to {bin_path}!")
+                    print(f"Poppler downloaded and extracted successfully to {bin_path}")
+                    # Verify critical files exist
+                    critical_files = ['pdfinfo.exe', 'pdftoppm.exe', 'pdftocairo.exe']
+                    missing_files = [f for f in critical_files
+                                     if not os.path.exists(os.path.join(bin_path, f))]
+                    if missing_files:
+                        print("Warning: Some critical Poppler files are missing:")
+                        for f in missing_files:
+                            print(f"  - {f}")
+                        return None
                     return os.path.abspath(bin_path)
                 else:
                     print(f"Error: Expected binary path {bin_path} not found after extraction")
+                    print("Directory contents:")
+                    for root, dirs, files in os.walk(poppler_dir):
+                        print(f"\nDirectory: {root}")
+                        for d in dirs:
+                            print(f"  Dir: {d}")
+                        for f in files:
+                            print(f"  File: {f}")
                     return None
 
             except requests.RequestException as e:
-                print(f"Error downloading Poppler: {str(e)}")
-                print("Please download Poppler manually from:")
-                print(poppler_url)
-                print("And extract it to a 'poppler-windows' directory.")
+                print(f"Network error downloading Poppler: {str(e)}")
+                print("\nPlease download Poppler manually:")
+                print("1. Download from:", poppler_url)
+                print("2. Create 'poppler-windows' directory")
+                print("3. Extract the downloaded zip there")
                 return None
             except Exception as e:
                 print(f"Unexpected error: {str(e)}")
+                print("Stack trace:", traceback.format_exc())
                 return None
         else:
             # Check if binaries exist in the expected location
