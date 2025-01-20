@@ -2483,7 +2483,9 @@ class DocumentAnalyzerGUI:
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
-                total_files=total_files
+                total_files=total_files,
+                top_margin_percent=self.top_margin_percent.get(),
+                bottom_margin_percent=self.bottom_margin_percent.get()
             )
 
             # Calculate sample size if sampling is enabled

@@ -88,27 +88,29 @@ class OutputHandler:
 
 
 class CSVOutputHandler(OutputHandler):
-    """Handles output in CSV format with file splitting"""
-
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.current_file_number = 1
         self.total_rows_written = 0
-
-        # Write metadata to separate JSON file
-        self.write_metadata()
+        # Removed the immediate self.write_metadata() call
 
     def write_metadata(self):
-        """Write metadata to a separate JSON file"""
+        """Write metadata to a separate JSON file, including margin info."""
         metadata_path = f"{os.path.splitext(self.output_path)[0]}_metadata.json"
+        # 1) Get base metadata from parent
+        meta = self.get_metadata_dict()
+
+        # Inject margin fields from the user’s final settings:
+        meta["top_margin_percent"] = self.settings.top_margin_percent
+        meta["bottom_margin_percent"] = self.settings.bottom_margin_percent
+
         with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump(self.get_metadata_dict(), f, indent=2)
+            json.dump(meta, f, indent=2)
 
     def get_next_filename(self) -> str:
         """Generate next filename for split files"""
         if self.current_file_number == 1:
             return os.path.abspath(self.output_path)
-
         abs_path = os.path.abspath(self.output_path)
         base, ext = os.path.splitext(abs_path)
         return f"{base}__{self.current_file_number}{ext}"
@@ -133,7 +135,6 @@ class CSVOutputHandler(OutputHandler):
                 processed_result = result.copy()
                 if 'File' in processed_result:
                     processed_result['File'] = os.path.abspath(processed_result['File'])
-
             processed_results.append(processed_result)
 
         # Check if we need a new file
@@ -147,7 +148,6 @@ class CSVOutputHandler(OutputHandler):
 
         # Convert to DataFrame
         df_batch = pd.DataFrame(processed_results)
-
         # For Page column, ensure it's properly typed
         if 'Page' in df_batch.columns:
             df_batch['Page'] = df_batch['Page'].astype('Int64')
@@ -163,6 +163,11 @@ class CSVOutputHandler(OutputHandler):
         )
 
         self.total_rows_written += current_batch_size
+
+        # If it's final, now we write the metadata (which has the *updated* margin).
+        if is_final:
+            self.write_metadata()
+
         return output_file
 
 
@@ -256,11 +261,16 @@ class ParquetOutputHandler(OutputHandler):
 
     def _write_metadata(self):
         """Write analysis metadata to companion JSON file"""
+
         try:
             metadata_path = f"{os.path.splitext(self.output_path)[0]}_metadata.json"
             metadata = self.get_metadata_dict()
 
-            # Add Parquet-specific metadata
+            # 1) Insert the user-selected margin values
+            metadata["top_margin_percent"] = self.settings.top_margin_percent
+            metadata["bottom_margin_percent"] = self.settings.bottom_margin_percent
+
+            # 2) Add Parquet-specific metadata
             metadata.update({
                 'row_group_size': self.row_group_size,
                 'compression': 'snappy',
