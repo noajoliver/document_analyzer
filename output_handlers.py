@@ -13,19 +13,16 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see https://www.gnu.org/licenses/.
 """
 
-import os
-import time
-import json
-import sqlite3
 import csv
-from typing import List, Dict, Any, Optional, Tuple
+import json
+import os
+import sqlite3
 from dataclasses import dataclass, asdict
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from datetime import datetime
 from threading import Lock
-from enum import Enum
+from typing import List, Dict, Any, Optional
+
+import pandas as pd
 
 
 @dataclass

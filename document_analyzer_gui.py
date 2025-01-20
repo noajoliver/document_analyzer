@@ -15,35 +15,29 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 
 # Standard library imports
 import os
-import sys
 import platform
-import time
 import queue
-import logging
-from threading import Thread, Event, Lock
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple, Set, Union
-from dataclasses import dataclass, field, replace
-from functools import partial
-
+import sys
+import time
 # GUI imports
 import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
+from threading import Thread, Event, Lock
 from tkinter import ttk, filedialog, scrolledtext, messagebox
+from typing import List, Dict, Any, Optional, Set, Union
 
+import fitz
 # Data processing imports
 import pandas as pd
-import numpy as np
-import fitz
 from PIL import Image
-from pdf2image import convert_from_path
 
 # Local module imports
-from content_analyzer import ContentAnalyzer, PageAnalyzer
+from content_analyzer import PageAnalyzer
 from error_handling import ErrorHandler, ErrorSeverity, ProcessingError, ErrorAwareResult
 from output_handlers import create_output_handler
-from sampling import FileProcessor, SamplingCalculator, SamplingParameters
 from pdf_utils import setup_poppler
+from sampling import FileProcessor, SamplingCalculator, SamplingParameters
 
 
 @dataclass

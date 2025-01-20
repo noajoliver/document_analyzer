@@ -13,13 +13,14 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see https://www.gnu.org/licenses/.
 """
 
-import fitz
-from PIL import Image
-import numpy as np
 import math
 import os
-from typing import Dict, Any, Tuple, Optional, List
 from dataclasses import dataclass
+from typing import Dict, Any, Tuple
+
+import fitz
+import numpy as np
+from PIL import Image
 
 
 @dataclass
