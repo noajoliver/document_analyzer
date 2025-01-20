@@ -406,11 +406,14 @@ class SQLiteOutputHandler(OutputHandler):
                     # Process each result
                     for result in batch:
                         try:
-                            # Get file info
                             rel_path = os.path.relpath(
                                 os.path.abspath(result['File']),
                                 os.path.dirname(self.output_path)
                             )
+                        except ValueError:
+                            # If we're on different Windows drive letters, relpath raises ValueError.
+                            # In that case, just store the full absolute path so we don't skip the row:
+                            rel_path = os.path.abspath(result['File'])
                             file_size = os.path.getsize(result['File']) if os.path.exists(result['File']) else 0
 
                             # Insert main result

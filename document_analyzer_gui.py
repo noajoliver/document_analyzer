@@ -209,6 +209,8 @@ class AnalysisSettings:
     include_images: bool = True
     process_subdirectories: bool = True
     minimal_output: bool = False
+    top_margin_percent: float = 5.0     # Default: top 5% of the page
+    bottom_margin_percent: float = 5.0  # Default: bottom 5% of the page
 
     def __post_init__(self):
         """Validate settings after initialization"""
@@ -388,6 +390,8 @@ class DocumentAnalyzerGUI:
         self.random_n_size = tk.StringVar(value='100')  # Default to 100 files
         self.confidence_level = tk.StringVar(value='95')
         self.margin_of_error = tk.StringVar(value='5')
+        self.top_margin_percent = tk.DoubleVar(value=5.0)
+        self.bottom_margin_percent = tk.DoubleVar(value=5.0)
 
         # File type selection
         self.include_pdfs = tk.BooleanVar(value=True)
@@ -477,14 +481,16 @@ class DocumentAnalyzerGUI:
                 threshold=self.threshold.get(),
                 output_format=self.output_format.get(),
                 max_rows_per_file=self.max_rows.get(),
-                excluded_folders=excluded_folders,  # Now explicitly passed
+                excluded_folders=excluded_folders,
                 use_sampling=self.use_sampling.get(),
                 use_random_n=self.use_random_n.get(),
                 random_n_size=int(self.random_n_size.get()) if self.use_random_n.get() else None,
                 confidence_level=confidence,
                 margin_of_error=margin,
                 include_pdfs=self.include_pdfs.get(),
-                include_images=self.include_images.get()
+                include_images=self.include_images.get(),
+                top_margin_percent=self.top_margin_percent.get(),  # new
+                bottom_margin_percent=self.bottom_margin_percent.get()  # new
             )
         except ValueError as e:
             raise ValueError(f"Invalid settings values: {str(e)}")
@@ -1189,20 +1195,78 @@ class DocumentAnalyzerGUI:
         count_frame.columnconfigure(0, weight=1)
 
     def setup_analysis_config(self, parent: ttk.Frame) -> None:
-        """Setup analysis configuration controls"""
+        """
+        Setup analysis configuration controls.
+        """
         config_frame = ttk.Frame(parent)
         config_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
-        # Threshold control
+        # 1) Threshold control
         self.setup_threshold_control(config_frame)
 
-        # CPU core selection
+        # 2) CPU core selection
         self.setup_core_selection(config_frame)
 
-        # Sampling controls
+        # 3) Sampling controls
         self.setup_sampling_controls(config_frame)
 
+        # 4) Margin configuration (NEW)
+        self.setup_margin_controls(config_frame)
+
+        # Let config_frame expand horizontally if needed
+        config_frame.columnconfigure(0, weight=1)
         config_frame.columnconfigure(1, weight=1)
+
+    def setup_margin_controls(self, parent: ttk.Frame) -> None:
+        """
+        Add labeled frame with user-configurable Top and Bottom Margin spinboxes.
+        """
+        # Create a LabelFrame for clarity
+        margin_frame = ttk.LabelFrame(parent, text="Margin Configuration", padding="5")
+        # Place it below sampling controls; adjust row as needed
+        margin_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+        # ----- TOP MARGIN -----
+        ttk.Label(margin_frame, text="Top Margin (%):").grid(
+            row=0, column=0, sticky=tk.W, padx=(5, 2), pady=(0, 5)
+        )
+        top_margin_spin = ttk.Spinbox(
+            margin_frame,
+            from_=0.0,
+            to=50.0,
+            increment=0.1,
+            textvariable=self.top_margin_percent,  # Make sure this is defined in _init_variables()
+            width=5,
+            format="%.1f"
+        )
+        top_margin_spin.grid(row=0, column=1, sticky=tk.W, padx=(0, 15), pady=(0, 5))
+
+        # ----- BOTTOM MARGIN -----
+        ttk.Label(margin_frame, text="Bottom Margin (%):").grid(
+            row=0, column=2, sticky=tk.W, padx=(5, 2), pady=(0, 5)
+        )
+        bottom_margin_spin = ttk.Spinbox(
+            margin_frame,
+            from_=0.0,
+            to=50.0,
+            increment=0.1,
+            textvariable=self.bottom_margin_percent,  # Also defined in _init_variables()
+            width=5,
+            format="%.1f"
+        )
+        bottom_margin_spin.grid(row=0, column=3, sticky=tk.W, padx=(0, 15), pady=(0, 5))
+
+        # ----- HELP BUTTON (optional) -----
+        margin_help = self.create_help_button(
+            margin_frame,
+            "These values define how much of the page (top/bottom) is considered a margin.\n"
+            "For example, 5.0 means the top/bottom 5% of the page height is treated as a margin."
+        )
+        margin_help.grid(row=0, column=4, sticky=tk.W, padx=(10, 0))
+
+        # Give the columns some weight to avoid crowding
+        margin_frame.columnconfigure(1, weight=1)
+        margin_frame.columnconfigure(3, weight=1)
 
     def setup_threshold_control(self, parent: ttk.Frame) -> None:
         """Setup threshold control section"""
@@ -2639,36 +2703,36 @@ class DocumentAnalyzerGUI:
                 try:
                     msg_type, msg_data = self.queue.get_nowait()
                     try:
-                        match msg_type:
-                            case "log":
-                                self.update_log(msg_data)
-                            case "progress":
-                                # Update progress bar
-                                self.update_progress_bar(msg_data)
+                        # Replace match with if/elif
+                        if msg_type == "log":
+                            self.update_log(msg_data)
+                        elif msg_type == "progress":
+                            # Update progress bar
+                            self.update_progress_bar(msg_data)
 
-                                # Update processing stats and timing info
-                                if hasattr(self, 'processing_stats'):
-                                    processed_count = int(msg_data * self.settings.total_files / 100)
-                                    self.processing_stats.update(processed_count)
+                            # Update processing stats and timing info
+                            if hasattr(self, 'processing_stats'):
+                                processed_count = int(msg_data * self.settings.total_files / 100)
+                                self.processing_stats.update(processed_count)
 
-                                    # Update timing displays
-                                    self.elapsed_var.set(
-                                        f"Elapsed: {self.processing_stats.get_elapsed_time()}"
-                                    )
-                                    self.remaining_var.set(
-                                        f"Remaining: {self.processing_stats.get_estimated_time_remaining(self.settings.total_files)}"
-                                    )
-                                    self.rate_var.set(
-                                        self.processing_stats.get_processing_rate()
-                                    )
-                            case "status":
-                                self.update_status(msg_data)
-                            case "complete":
-                                self.handle_completion()
-                                # Don't return here - let task_done() execute first
-                                should_return = True
-                            case _:
-                                self.log_message(f"Unknown message type: {msg_type}")
+                                # Update timing displays
+                                self.elapsed_var.set(
+                                    f"Elapsed: {self.processing_stats.get_elapsed_time()}"
+                                )
+                                self.remaining_var.set(
+                                    f"Remaining: {self.processing_stats.get_estimated_time_remaining(self.settings.total_files)}"
+                                )
+                                self.rate_var.set(
+                                    self.processing_stats.get_processing_rate()
+                                )
+                        elif msg_type == "status":
+                            self.update_status(msg_data)
+                        elif msg_type == "complete":
+                            self.handle_completion()
+                            # Don't return here - let task_done() execute first
+                            should_return = True
+                        else:
+                            self.log_message(f"Unknown message type: {msg_type}")
                     finally:
                         # Ensure task_done() is called for every get()
                         self.queue.task_done()

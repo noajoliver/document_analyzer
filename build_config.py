@@ -30,21 +30,31 @@ def verify_dependencies():
 
     print("Verifying dependencies...")
 
-    # Dictionary of dependencies and their import names
+    # Dictionary of dependencies and their import names with optional version requirements
     dependencies = {
-        'PyMuPDF': 'fitz',
-        'pdf2image': 'pdf2image',
-        'Pillow': 'PIL',
-        'pandas': 'pandas',
-        'numpy': 'numpy',
-        'pyinstaller': 'PyInstaller',
-        'requests': 'requests',
-        'pyarrow': 'pyarrow',
+        'PyMuPDF': ('fitz', '1.23.8'),
+        'pdf2image': ('pdf2image', '1.16.3'),
+        'Pillow': ('PIL', '10.1.0'),
+        'pandas': ('pandas', '2.1.4'),
+        'numpy': ('numpy', '1.26.2'),
+        'pyinstaller': ('PyInstaller', '6.3.0'),
+        'requests': ('requests', '2.32.0'),
+        'pyarrow': ('pyarrow', '14.0.1'),
+        'setuptools': ('setuptools', '65.5.1'),
+        'wheel': ('wheel', '0.38.0'),
+        'tk': ('tkinter', None),  # Built into Python
     }
 
-    for package, import_name in dependencies.items():
+    for package, (import_name, version) in dependencies.items():
         try:
-            __import__(import_name)
+            module = __import__(import_name)
+            if version:
+                try:
+                    module_version = getattr(module, '__version__', None)
+                    if module_version and module_version < version:
+                        print(f"⚠ {package} version {module_version} is older than required {version}")
+                except AttributeError:
+                    print(f"⚠ Could not verify version for {package}")
             print(f"✓ {package} verified")
         except ImportError:
             missing_deps.append(package)
@@ -184,6 +194,8 @@ def download_poppler():
 def create_spec_file(poppler_path):
     """Create a PyInstaller spec file with the correct configuration."""
 
+    print(f"Creating spec file with Poppler path: {poppler_path}")
+
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 
 import os
@@ -212,6 +224,7 @@ data_files = [
 
 # Add additional module files
 module_files = [
+    'document_analyzer_gui.py',
     'content_analyzer.py',
     'error_handling.py',
     'output_handlers.py',
@@ -228,7 +241,7 @@ a = Analysis(
     pathex=[],
     binaries=POPPLER_DATA,
     datas=data_files,
-    hiddenimports=[
+    hiddenimports = [
         'PIL._tkinter_finder',
         'pandas',
         'numpy',
@@ -249,6 +262,11 @@ a = Analysis(
         'winsound',
         'PIL.ImageDraw',
         'PIL.ImageFilter',
+        'sqlite3',
+        'logging',
+        'json',
+        'csv',
+        'datetime'
     ],
     hookspath=[],
     hooksconfig={{}},
@@ -356,22 +374,42 @@ if not os.path.exists(logs_dir):
     os.makedirs(logs_dir)
 """
 
-    with open('document_analyzer.spec', 'w', encoding='utf-8') as f:
-        f.write(spec_content)
-    print("Created PyInstaller spec file with Poppler configuration")
+    spec_path = 'document_analyzer.spec'
+    try:
+        with open(spec_path, 'w', encoding='utf-8') as f:
+            f.write(spec_content)
+        print(f"Created PyInstaller spec file at: {os.path.abspath(spec_path)}")
+
+        # Verify file was created
+        if os.path.exists(spec_path):
+            print("Successfully verified spec file creation")
+        else:
+            print("Warning: Spec file not found after creation attempt")
+
+    except Exception as e:
+        print(f"Error creating spec file: {str(e)}")
+        raise
 
 
 def create_requirements():
     """Create requirements.txt file with specific versions."""
     requirements = """
+# Core processing dependencies
 PyMuPDF==1.23.8
 pdf2image==1.16.3
 Pillow==10.1.0
 pandas==2.1.4
 numpy==1.26.2
+pyarrow==14.0.1
+
+# Build dependencies
 pyinstaller==6.3.0
 requests==2.32.0
-pyarrow==14.0.1
+setuptools>=65.5.1
+wheel>=0.38.0
+
+# Additional dependencies for PDF processing
+pdf2image==1.16.3
 """
     with open('requirements.txt', 'w', encoding='utf-8') as f:
         f.write(requirements.strip())

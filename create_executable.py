@@ -175,44 +175,73 @@ def copy_required_files(source_dir: str, temp_dir: str):
     ]
 
     print("Copying required files...")
+
+    # Ensure target directory exists
+    os.makedirs(temp_dir, exist_ok=True)
+
+    # Copy each required file
     for file in required_files:
-        source_path = os.path.join(source_dir, file)
-        dest_path = os.path.join(temp_dir, file)
-        if os.path.exists(source_path):
-            shutil.copy2(source_path, dest_path)
-            print(f"Copied: {file}")
-        else:
-            print(f"Warning: Required file not found at {source_path}")
+        try:
+            source_path = os.path.abspath(os.path.join(source_dir, file))
+            dest_path = os.path.abspath(os.path.join(temp_dir, file))
+
+            if os.path.exists(source_path):
+                shutil.copy2(source_path, dest_path)
+                print(f"Copied: {file}")
+
+                # Verify the copy was successful
+                if not os.path.exists(dest_path):
+                    print(f"Warning: Failed to verify copy of {file}")
+                elif os.path.getsize(source_path) != os.path.getsize(dest_path):
+                    print(f"Warning: Size mismatch for {file}")
+            else:
+                print(f"Warning: Required file not found at {source_path}")
+        except Exception as e:
+            print(f"Error copying {file}: {str(e)}")
 
     # Copy icon if exists
     icon_path = os.path.join(source_dir, 'icon.ico')
     if os.path.exists(icon_path):
-        shutil.copy2(icon_path, os.path.join(temp_dir, 'icon.ico'))
-        print("Copied: icon.ico")
+        try:
+            icon_dest = os.path.join(temp_dir, 'icon.ico')
+            shutil.copy2(icon_path, icon_dest)
+            print("Copied: icon.ico")
+        except Exception as e:
+            print(f"Error copying icon.ico: {str(e)}")
 
     # Copy poppler directory with verification
     poppler_source = os.path.join(source_dir, 'poppler-windows')
     if os.path.exists(poppler_source):
-        poppler_dest = os.path.join(temp_dir, 'poppler-windows')
-        print(f"Copying Poppler from {poppler_source} to {poppler_dest}")
-        shutil.copytree(poppler_source, poppler_dest)
-        print("Copied: poppler-windows directory")
+        try:
+            poppler_dest = os.path.join(temp_dir, 'poppler-windows')
+            print(f"Copying Poppler from {poppler_source} to {poppler_dest}")
 
-        # Verify critical Poppler files
-        bin_path = os.path.join(poppler_dest, 'poppler-23.08.0', 'Library', 'bin')
-        if os.path.exists(bin_path):
-            print("Verified Poppler binaries location")
-        else:
-            print(f"Warning: Poppler binaries not found at {bin_path}")
+            # Remove destination if it exists
+            if os.path.exists(poppler_dest):
+                shutil.rmtree(poppler_dest)
+
+            shutil.copytree(poppler_source, poppler_dest)
+            print("Copied: poppler-windows directory")
+
+            # Verify critical Poppler files
+            bin_path = os.path.join(poppler_dest, 'poppler-23.08.0', 'Library', 'bin')
+            if os.path.exists(bin_path):
+                print("Verified Poppler binaries location")
+
+                # Check critical files
+                critical_files = ['pdfinfo.exe', 'pdftoppm.exe', 'pdftocairo.exe']
+                missing_files = [f for f in critical_files
+                                 if not os.path.exists(os.path.join(bin_path, f))]
+                if missing_files:
+                    print("Warning: Missing critical Poppler files:")
+                    for f in missing_files:
+                        print(f"  - {f}")
+            else:
+                print(f"Warning: Poppler binaries not found at {bin_path}")
+        except Exception as e:
+            print(f"Error copying Poppler directory: {str(e)}")
     else:
         print("WARNING: Poppler directory not found in source directory!")
-        print("Running build_config.py to download Poppler...")
-        original_cwd = os.getcwd()
-        os.chdir(temp_dir)
-        success, output = run_command("python build_config.py")
-        os.chdir(original_cwd)
-        if not success:
-            print(f"Error downloading Poppler: {output}")
 
 
 def setup_virtual_env(temp_dir: str) -> bool:
@@ -246,7 +275,7 @@ def setup_virtual_env(temp_dir: str) -> bool:
 
         # Upgrade pip first using python -m pip to avoid path issues
         print("Upgrading pip...")
-        upgrade_cmd = [python_path, "-m", "pip", "install", "--upgrade", "pip"]
+        upgrade_cmd = [python_path, "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"]
         result = subprocess.run(
             upgrade_cmd,
             check=True,
@@ -264,14 +293,44 @@ def setup_virtual_env(temp_dir: str) -> bool:
             print(f"Error: Requirements file not found at {requirements_path}")
             return False
 
+        # First install core dependencies
+        core_deps = ["wheel", "setuptools", "numpy"]
+        for dep in core_deps:
+            print(f"Installing {dep}...")
+            install_cmd = [python_path, "-m", "pip", "install", dep]
+            subprocess.run(install_cmd, check=True, cwd=temp_dir, capture_output=True)
+
+        # Then install from requirements file
         install_cmd = [python_path, "-m", "pip", "install", "-r", requirements_path]
-        result = subprocess.run(
-            install_cmd,
-            check=True,
-            cwd=temp_dir,
-            capture_output=True,
-            text=True
-        )
+        try:
+            result = subprocess.run(
+                install_cmd,
+                check=True,
+                cwd=temp_dir,
+                capture_output=True,
+                text=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"Error installing requirements: {e.stderr}")
+            return False
+
+        # Verify critical packages
+        verify_packages = [
+            'pandas',
+            'pyarrow',
+            'fitz',  # PyMuPDF
+            'PIL',  # Pillow
+            'numpy'
+        ]
+
+        for package in verify_packages:
+            try:
+                cmd = [python_path, "-c", f"import {package}"]
+                subprocess.run(cmd, check=True, cwd=temp_dir, capture_output=True)
+                print(f"✓ {package} verified")
+            except subprocess.CalledProcessError:
+                print(f"✗ Failed to verify {package}")
+                return False
 
         print("Virtual environment setup completed successfully")
         return True
@@ -285,7 +344,7 @@ def setup_virtual_env(temp_dir: str) -> bool:
         return False
 
 
-def setup_poppler(temp_dir: str) -> bool:
+def setup_poppler(temp_dir: str) -> Optional[str]:
     """
     Ensure Poppler is properly set up in the build directory
 
@@ -293,35 +352,57 @@ def setup_poppler(temp_dir: str) -> bool:
         temp_dir: Temporary build directory path
 
     Returns:
-        bool: True if setup was successful
+        Optional[str]: Path to Poppler binaries if successful, None otherwise
     """
     try:
         print("\nVerifying Poppler setup...")
 
-        # Run build_config to download Poppler
-        print("Running build_config.py to download Poppler...")
-        success, output = run_command("python build_config.py", temp_dir)
-        if not success:
-            print(f"Error downloading Poppler: {output}")
-            return False
+        # First check if Poppler already exists in temp directory
+        bin_path = os.path.join(temp_dir, 'poppler-windows', 'poppler-23.08.0', 'Library', 'bin')
+        if os.path.exists(bin_path):
+            print(f"Found existing Poppler installation at: {bin_path}")
+            return os.path.abspath(bin_path)
 
-        # Wait briefly for files to be available
-        time.sleep(1)
+        print("Downloading and setting up Poppler...")
+        from build_config import download_poppler
+        poppler_path = download_poppler()
 
-        # Verify Poppler directory structure
-        poppler_source = os.path.join(temp_dir, 'poppler-windows')
-        bin_path = os.path.join(poppler_source, 'poppler-23.08.0', 'Library', 'bin')
+        if not poppler_path:
+            print("Error: Failed to obtain Poppler path")
+            print("\nTo manually install Poppler:")
+            print(
+                "1. Download from: https://github.com/oschwartz10612/poppler-windows/releases/download/v23.08.0-0/Release-23.08.0-0.zip")
+            print("2. Create 'poppler-windows' directory in the project root")
+            print("3. Extract the downloaded zip into that directory")
+            print(f"4. Verify that this path exists: {bin_path}")
+            return None
 
-        if not os.path.exists(bin_path):
-            print(f"Error: Poppler binaries not found at {bin_path}")
-            return False
+        # Verify the installation
+        if not os.path.exists(poppler_path):
+            print(f"Error: Poppler path does not exist: {poppler_path}")
+            return None
 
-        print("Poppler setup verified successfully")
-        return True
+        # Check for critical files
+        critical_files = ['pdfinfo.exe', 'pdftoppm.exe', 'pdftocairo.exe']
+        missing_files = [f for f in critical_files if not os.path.exists(os.path.join(poppler_path, f))]
 
+        if missing_files:
+            print("Error: Missing critical Poppler files:")
+            for file in missing_files:
+                print(f"  - {file}")
+            return None
+
+        print(f"Poppler setup verified successfully at: {poppler_path}")
+        return poppler_path
+
+    except ImportError as e:
+        print(f"Error importing build_config: {str(e)}")
+        print("Stack trace:", traceback.format_exc())
+        return None
     except Exception as e:
-        print(f"Error setting up Poppler: {e}")
-        return False
+        print(f"Error setting up Poppler: {str(e)}")
+        print("Stack trace:", traceback.format_exc())
+        return None
 
 
 def verify_build(source_dir: str, dist_dir: str) -> bool:
@@ -435,15 +516,41 @@ def main():
 
         # Setup Poppler first
         print("\nStep 4: Setting up Poppler...")
+        poppler_path = None
         if platform.system() == "Windows":
-            if not setup_poppler(temp_dir):
+            poppler_path = setup_poppler(temp_dir)
+            if not poppler_path:
                 print("Failed to set up Poppler")
                 return 1
 
         print("\nStep 5: Running build configuration...")
-        success, output = run_command("python build_config.py")
-        if not success:
-            print(f"Error in build configuration: {output}")
+        try:
+            from build_config import create_spec_file
+
+            # Create spec file with Poppler path
+            print("Creating PyInstaller spec file...")
+            create_spec_file(poppler_path)
+
+            # Verify spec file creation
+            if not os.path.exists('document_analyzer.spec'):
+                print("Error: Spec file creation failed")
+                return 1
+
+            # Verify spec file content
+            with open('document_analyzer.spec', 'r') as f:
+                spec_content = f.read()
+                if 'document_analyzer_gui.py' not in spec_content:
+                    print("Error: Spec file appears to be invalid")
+                    return 1
+
+            print("Successfully created and verified spec file")
+
+        except ImportError as e:
+            print(f"Error importing build_config: {str(e)}")
+            return 1
+        except Exception as e:
+            print(f"Error in build configuration: {str(e)}")
+            print("Stack trace:", traceback.format_exc())
             return 1
 
         print("\nStep 6: Running PyInstaller...")
@@ -480,8 +587,7 @@ def main():
 
     except Exception as e:
         print(f"Build failed with error: {str(e)}")
-        import traceback
-        traceback.print_exc()  # Print full traceback for debugging
+        print("Stack trace:", traceback.format_exc())
         return 1
 
     finally:
