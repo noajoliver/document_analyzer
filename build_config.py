@@ -196,6 +196,10 @@ def create_spec_file(poppler_path):
 
     print(f"Creating spec file with Poppler path: {poppler_path}")
 
+    # --- UPDATED README CONTENT ---
+    #
+    # Added a mention about user-configurable top/bottom margin percentages.
+    #
     spec_content = f"""# -*- mode: python ; coding: utf-8 -*-
 
 import os
@@ -330,6 +334,8 @@ Features:
   • 1.1-2.0%: Moderate tolerance
   • 2.1-5.0%: Lower sensitivity
   • 5.1-10.0%: Minimal sensitivity
+- **New**: User-configurable top & bottom margin percentages (up to 50%) 
+  to fine-tune how much of the page is considered "margin."
 - Multiple output formats (CSV, Parquet, SQLite)
 - Statistical sampling options for large document sets
 - Multi-threaded processing with configurable CPU cores
@@ -344,7 +350,7 @@ Requirements:
 Usage:
 1. Launch DocumentMarginAnalyzer.exe
 2. Configure analysis settings:
-   - Set detection threshold
+   - Set detection threshold (and now top/bottom margin %)
    - Choose output format
    - Select file types (PDF/Images)
    - Configure CPU core usage
@@ -430,6 +436,8 @@ def cleanup_old_files():
         '*.pyd',
         'logs/*.log',
     ]
+
+    from pathlib import Path
 
     for path in cleanup_paths:
         try:
