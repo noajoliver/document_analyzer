@@ -518,7 +518,9 @@ class DocumentAnalyzerGUI:
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
-                minimal_output=self.minimal_output.get() if hasattr(self, 'minimal_output') else False
+                minimal_output=self.minimal_output.get() if hasattr(self, 'minimal_output') else False,
+                top_margin_percent=self.top_margin_percent.get(),
+                bottom_margin_percent=self.bottom_margin_percent.get()
             )
 
             # Update instance settings
