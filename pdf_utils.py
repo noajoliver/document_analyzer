@@ -17,7 +17,9 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 import os
 import sys
 import platform
+import logging
 
+logger = logging.getLogger(__name__)
 
 def setup_poppler() -> str:
     """
@@ -46,7 +48,7 @@ def setup_poppler() -> str:
 
             return poppler_path
         else:
-            print(f"Warning: Poppler path not found at {poppler_path}")
+            logger.warning(f"Poppler path not found at {poppler_path}")
             return ""
 
     return ""  # Return empty string for non-Windows systems

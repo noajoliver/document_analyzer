@@ -15,6 +15,7 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 
 import math
 import os
+import logging
 from dataclasses import dataclass
 from typing import Dict, Any, Tuple
 
@@ -22,6 +23,7 @@ import fitz
 import numpy as np
 from PIL import Image
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class MarginMeasurements:
@@ -111,7 +113,7 @@ class ContentAnalyzer:
                                   found in the top/bottom margin areas.
         """
         # 1) Print current detection threshold for debugging
-        print(f"\nAnalyzing with threshold: {self.threshold}%")
+        logger.debug(f"\nAnalyzing with threshold: {self.threshold}%")
 
         # 2) Convert image to grayscale for content detection
         gray_image = image.convert('L')
@@ -146,10 +148,10 @@ class ContentAnalyzer:
         bottom_percentage = (bottom_pixels / bottom_margin_area) * 100.0
 
         # 7) Debug prints: Show computed percentages vs. threshold
-        print(f"Top margin content: {top_percentage:.2f}% (threshold {self.threshold}%)")
-        print(f"Bottom margin content: {bottom_percentage:.2f}% (threshold {self.threshold}%)")
-        print(f"Top > threshold? {top_percentage > self.threshold}")
-        print(f"Bottom > threshold? {bottom_percentage > self.threshold}")
+        logger.debug(f"Top margin content: {top_percentage:.2f}% (threshold {self.threshold}%)")
+        logger.debug(f"Bottom margin content: {bottom_percentage:.2f}% (threshold {self.threshold}%)")
+        logger.debug(f"Top > threshold? {top_percentage > self.threshold}")
+        logger.debug(f"Bottom > threshold? {bottom_percentage > self.threshold}")
 
         # 8) Calculate total margin area and total margin content
         total_margin_area = top_margin_area + bottom_margin_area
@@ -166,8 +168,8 @@ class ContentAnalyzer:
         )
 
         # 10) Print final booleans for clarity
-        print(f"Final has_top_content={result.has_top_content}")
-        print(f"Final has_bottom_content={result.has_bottom_content}")
+        logger.debug(f"Final has_top_content={result.has_top_content}")
+        logger.debug(f"Final has_bottom_content={result.has_bottom_content}")
 
         return result
 
@@ -297,14 +299,14 @@ class PageAnalyzer:
             settings: Analysis settings including threshold
         """
         # Add debug print to verify the threshold
-        print(f"Initializing PageAnalyzer with threshold: {settings.threshold}%")
+        logger.info(f"Initializing PageAnalyzer with threshold: {settings.threshold}%")
         self.content_analyzer = ContentAnalyzer(threshold=settings.threshold)
         self.settings = settings
         self.top_margin_percent = settings.top_margin_percent
         self.bottom_margin_percent = settings.bottom_margin_percent
 
         # Verify the threshold was set correctly
-        print(f"ContentAnalyzer threshold set to: {self.content_analyzer.threshold}%")
+        logger.info(f"ContentAnalyzer threshold set to: {self.content_analyzer.threshold}%")
 
     def analyze_pdf_page(self, page: fitz.Page, file_name: str, page_num: int) -> Dict[str, Any]:
         """
@@ -413,8 +415,9 @@ class PageAnalyzer:
         Returns:
             Dict containing analysis results
         """
+        abs_image_path = os.path.abspath(image_path)
         try:
-            with Image.open(image_path) as image:
+            with Image.open(abs_image_path) as image:
                 image = image.convert('RGB')
                 analysis = self.content_analyzer.analyze_image_content(image)
 
@@ -431,7 +434,7 @@ class PageAnalyzer:
                 )
 
                 return {
-                    "File": image_path,
+                    "File": abs_image_path,
                     "Page": 1,
                     "Content Status": content_status,
                     "Type": "Image",
@@ -441,10 +444,21 @@ class PageAnalyzer:
                         "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
                     }
                 }
-
-        except Exception as e:
+        except (IOError, OSError) as ioe: # Specific errors for image opening issues
+            logger.error(f"Failed to open image {abs_image_path}: {ioe}", exc_info=True)
             return {
-                "File": os.path.basename(image_path),
+                "File": abs_image_path,
+                "Page": 1,
+                "Content Status": "Processing Failed",
+                "Type": "Image",
+                "Analysis Details": {},
+                "Error": f"Failed to open image: {str(ioe)}",
+                "Error Severity": "ERROR"
+            }
+        except Exception as e: # General fallback
+            logger.error(f"Error processing image {abs_image_path}: {e}", exc_info=True)
+            return {
+                "File": abs_image_path,
                 "Page": 1,
                 "Content Status": "Processing Failed",
                 "Type": "Image",

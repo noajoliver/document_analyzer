@@ -19,6 +19,7 @@ import platform
 import queue
 import sys
 import time
+import logging
 # GUI imports
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor
@@ -39,6 +40,7 @@ from output_handlers import create_output_handler
 from pdf_utils import setup_poppler
 from sampling import FileProcessor, SamplingCalculator, SamplingParameters
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ProcessingStats:
@@ -99,7 +101,7 @@ class ProcessingStats:
             self.total_processed = processed_count
             self.last_update_time = current_time
         except Exception as e:
-            print(f"Error updating processing stats: {str(e)}")
+            logger.error(f"Error updating processing stats: {e}", exc_info=True)
 
     def get_elapsed_time(self) -> str:
         """
@@ -123,7 +125,7 @@ class ProcessingStats:
             seconds = elapsed % 60
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         except Exception as e:
-            print(f"Error calculating elapsed time: {str(e)}")
+            logger.error(f"Error calculating elapsed time: {e}", exc_info=True)
             return "00:00:00"
 
     def get_estimated_time_remaining(self, total_files: int) -> str:
@@ -137,13 +139,17 @@ class ProcessingStats:
             str: Formatted time remaining estimate
         """
         try:
-            if (not self.start_time or not self.recent_rates or
-                    self.total_processed == 0 or self.pause_time):
+            if (not self.start_time or self.total_processed == 0 or self.pause_time):
+                logger.debug("ProcessingStats: Conditions not met for ETA calculation (start_time, total_processed, or paused).")
+                return "Calculating..."
+            
+            if not self.recent_rates:
+                logger.debug("ProcessingStats: No recent rates available for ETA calculation.")
                 return "Calculating..."
 
-            # Use average of recent processing rates
             avg_rate = sum(self.recent_rates) / len(self.recent_rates)
             if avg_rate <= 0:
+                logger.debug(f"ProcessingStats: Average rate is {avg_rate}, cannot calculate ETA.")
                 return "Calculating..."
 
             remaining_files = total_files - self.total_processed
@@ -162,7 +168,7 @@ class ProcessingStats:
             else:
                 return f"{seconds}s remaining"
         except Exception as e:
-            print(f"Error calculating time remaining: {str(e)}")
+            logger.error(f"Error calculating time remaining: {e}", exc_info=True)
             return "Calculating..."
 
     def get_processing_rate(self) -> str:
@@ -174,14 +180,16 @@ class ProcessingStats:
         """
         try:
             if not self.recent_rates:
+                logger.debug("ProcessingStats: No recent rates available for processing rate calculation.")
                 return "0 files/sec"
 
             avg_rate = sum(self.recent_rates) / len(self.recent_rates)
+            # No need to check for avg_rate <= 0 here, as 0 files/sec is a valid output.
             if avg_rate >= 10:
                 return f"{avg_rate:.0f} files/sec"
             return f"{avg_rate:.1f} files/sec"
         except Exception as e:
-            print(f"Error calculating processing rate: {str(e)}")
+            logger.error(f"Error calculating processing rate: {e}", exc_info=True)
             return "0 files/sec"
 
 
@@ -605,17 +613,17 @@ class DocumentAnalyzerGUI:
                 try:
                     self.current_output_handler.cleanup()
                 except Exception as e:
-                    print(f"Error during output handler cleanup: {e}")
+                    logger.error(f"Error during output handler cleanup: {e}", exc_info=True)
 
             # Clean up error handler
             if hasattr(self, 'error_handler'):
                 try:
                     self.error_handler.clear_errors()
                 except Exception as e:
-                    print(f"Error during error handler cleanup: {e}")
+                    logger.error(f"Error during error handler cleanup: {e}", exc_info=True)
 
         except Exception as e:
-            print(f"Error during cleanup: {e}")
+            logger.error(f"Error during cleanup: {e}", exc_info=True)
         finally:
             # Ensure we don't prevent window from closing
             self.root.destroy()
@@ -791,11 +799,11 @@ class DocumentAnalyzerGUI:
                             self.log_expand_btn.invoke()
 
             # Also print to console for debugging
-            print(formatted_message.strip())
+            logger.info(message)
 
         except Exception as e:
             # Fallback to print if logging fails
-            print(f"Failed to log message: {str(e)}")
+            logger.error(f"Failed to log message to GUI: {e}", exc_info=True)
             print(f"Original message: {message}")
 
     def setup_ui(self) -> None:
@@ -1891,6 +1899,7 @@ class DocumentAnalyzerGUI:
 
         abs_path = os.path.abspath(pdf_path)
         try:
+            # Attempt to open the PDF
             with fitz.open(pdf_path) as pdf:
                 # Check if PDF is encrypted
                 if pdf.is_encrypted:
@@ -1946,14 +1955,25 @@ class DocumentAnalyzerGUI:
                 "Error": "Encryption Error: document closed or encrypted",
                 "Error Severity": "WARNING"
             }]
-        except Exception as e:
-            self.handle_processing_error(e, pdf_path)
+        except fitz.errors.FitzError as fe: # Specific PyMuPDF errors
+            logger.error(f"Failed to open or process PDF {abs_path} with FitzError: {fe}", exc_info=True)
             return [{
                 "File": abs_path,
-                "Page": 1,
+                "Page": "N/A", # Page count might be undetermined
                 "Content Status": "Processing Failed",
                 "Type": "PDF",
-                "Error": str(e),
+                "Error": f"Failed to open/process PDF (FitzError): {str(fe)}",
+                "Error Severity": "ERROR"
+            }]
+        except Exception as e: # Catch any other exceptions during open or initial processing
+            logger.error(f"Failed to open or process PDF {abs_path}: {e}", exc_info=True)
+            # self.handle_processing_error(e, pdf_path) # This is already implicitly handled by returning the error structure
+            return [{
+                "File": abs_path,
+                "Page": "N/A",
+                "Content Status": "Processing Failed",
+                "Type": "PDF",
+                "Error": f"Failed to open/process PDF: {str(e)}",
                 "Error Severity": "ERROR"
             }]
 
@@ -3041,6 +3061,7 @@ class DocumentAnalyzerGUI:
 
 def main() -> None:
     """Main entry point for the application"""
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
     root = tk.Tk()
     app = None
 
