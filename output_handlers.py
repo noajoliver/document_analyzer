@@ -453,7 +453,7 @@ class SQLiteOutputHandler(OutputHandler):
         try:
             # Main results table
             conn.execute('''
-            CREATE TABLE IF NOT EXISTS analysis_results (
+                CREATE TABLE IF NOT EXISTS analysis_results (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         file_path TEXT NOT NULL,
                         page_number INTEGER,
@@ -468,11 +468,11 @@ class SQLiteOutputHandler(OutputHandler):
                         processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         batch_id INTEGER
                     )
-            ''')
+                ''')
 
             # Analysis details table
             conn.execute('''
-            CREATE TABLE IF NOT EXISTS analysis_details (
+                    CREATE TABLE IF NOT EXISTS analysis_details (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         result_id INTEGER NOT NULL,
                         category TEXT NOT NULL,
@@ -482,11 +482,11 @@ class SQLiteOutputHandler(OutputHandler):
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY(result_id) REFERENCES analysis_results(id) ON DELETE CASCADE
                     )
-            ''')
+                ''')
 
             # Processing stats table
             conn.execute('''
-            CREATE TABLE IF NOT EXISTS processing_stats (
+                    CREATE TABLE IF NOT EXISTS processing_stats (
                         batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
                         start_time TIMESTAMP,
                         end_time TIMESTAMP,
@@ -494,18 +494,18 @@ class SQLiteOutputHandler(OutputHandler):
                         success_count INTEGER,
                         error_count INTEGER
                     )
-            ''')
+                ''')
 
             # Metadata table
             conn.execute('''
-            CREATE TABLE IF NOT EXISTS analysis_metadata (
+                    CREATE TABLE IF NOT EXISTS analysis_metadata (
                         key TEXT NOT NULL,
                         value TEXT,
                         version INTEGER DEFAULT 1,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (key, version)
                     )
-            ''')
+                ''')
 
             # Create initial indexes
             conn.execute('CREATE INDEX IF NOT EXISTS idx_file_path ON analysis_results(file_path)')
@@ -513,7 +513,7 @@ class SQLiteOutputHandler(OutputHandler):
             conn.execute('CREATE INDEX IF NOT EXISTS idx_details_result ON analysis_details(result_id)')
 
             # Store initial metadata
-            # self._store_metadata(conn) # This was removed in the previous step's plan, will be re-added below correctly.
+            self._store_metadata(conn) # Store other metadata
 
         except sqlite3.Error as e:
             self.logger.error(f"Failed to initialize SQLite database schema: {e}", exc_info=True)
@@ -522,38 +522,37 @@ class SQLiteOutputHandler(OutputHandler):
         # Column Descriptions Table (moved into _perform_init_schema)
         descriptions_table_name = "output_column_descriptions"
         try:
-            cursor = conn.cursor() # This line was indented one level too far.
+            cursor = conn.cursor()
             cursor.execute(f'''
-            CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
-                column_name TEXT PRIMARY KEY,
-                description TEXT
-            )
+                CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
+                    column_name TEXT PRIMARY KEY,
+                    description TEXT
+                )
             ''')
             for col_name, desc_text in COLUMN_DESCRIPTIONS.items():
                 cursor.execute(f'''
-                INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
-                VALUES (?, ?)
+                    INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
+                    VALUES (?, ?)
                 ''', (col_name, desc_text))
-            conn.commit() # Commit after populating descriptions
+            conn.commit()
             self.logger.info(f"Ensured '{descriptions_table_name}' table exists and is populated.")
         except sqlite3.Error as e:
-            self.logger.error(f"Error creating/populating column descriptions table '{descriptions_table_name}': {e}", exc_info=True)
+            self.logger.error(f"Error creating/populating metadata table '{descriptions_table_name}': {e}", exc_info=True)
+            # Do not raise here
 
-        # Store initial analysis metadata (distinct from column descriptions)
+        # Store initial metadata (moved into _perform_init_schema)
         try:
-            metadata_to_store = self.get_metadata_dict()
-            # total_records will be 0 initially, can be updated later if needed via a separate task or at the end
-            metadata_to_store['total_records_processed_in_db'] = 0
-            metadata_to_store['schema_version'] = "1.0" # Example of schema versioning
+            metadata = self.get_metadata_dict()
+            # total_records will be 0 initially, can be updated later if needed via a separate task
+            metadata['total_records'] = 0
+            metadata['schema_created_at'] = datetime.now().isoformat()
 
-            # Using INSERT OR REPLACE for simplicity for this initial metadata.
-            # For versioning, a more complex strategy might be needed if multiple versions of metadata are stored.
             conn.executemany(
-                '''INSERT OR REPLACE INTO analysis_metadata (key, value, updated_at)
-                   VALUES (?, ?, CURRENT_TIMESTAMP)''',
-                [(k, json.dumps(v)) for k, v in metadata_to_store.items()]
+                '''INSERT OR REPLACE INTO analysis_metadata (key, value)
+                   VALUES (?, ?)''', # Using INSERT OR REPLACE for simplicity for initial metadata
+                [(k, json.dumps(v)) for k, v in metadata.items()]
             )
-            conn.commit() # Commit after storing analysis metadata
+            conn.commit()
             self.logger.info("Initial analysis metadata stored in SQLite.")
         except sqlite3.Error as e:
             self.logger.error(f"Error storing initial analysis metadata in SQLite: {e}", exc_info=True)
@@ -573,8 +572,8 @@ class SQLiteOutputHandler(OutputHandler):
             # Create batch record in processing_stats
             cursor = conn.cursor() # Obtain a cursor from the connection
             cursor.execute('''
-            INSERT INTO processing_stats (start_time, records_processed)
-            VALUES (?, ?)
+                INSERT INTO processing_stats (start_time, records_processed)
+                VALUES (?, ?)
             ''', (batch_start_time, len(batch_data)))
             batch_id = cursor.lastrowid
 
@@ -589,21 +588,20 @@ class SQLiteOutputHandler(OutputHandler):
                     rel_path = os.path.abspath(result['File'])
 
                 file_size = 0
-                if os.path.exists(result['File']): # Check existence before getting size
+                if os.path.exists(result['File']):
                     try:
                         file_size = os.path.getsize(result['File'])
-                    except OSError: # Handle potential race condition if file is deleted after check
-                        self.logger.warning(f"Could not get size for file (it may have been deleted): {result['File']}")
-                        pass # Keep file_size as 0
+                    except OSError: # Handle potential race condition if file is deleted
+                        pass
 
 
                 # Insert main result
                 cursor.execute('''
-                INSERT INTO analysis_results
-                (file_path, page_number, content_status, text_status,
-                 image_status, file_type, error_message, error_severity,
-                 relative_path, file_size, batch_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO analysis_results
+                    (file_path, page_number, content_status, text_status,
+                     image_status, file_type, error_message, error_severity,
+                     relative_path, file_size, batch_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     result['File'],
                     result.get('Page', 1),
@@ -630,7 +628,7 @@ class SQLiteOutputHandler(OutputHandler):
                                 except (ValueError, TypeError):
                                     numeric_value = None
                                 details_to_insert.append((result_id, category, key, str(value_item), numeric_value))
-                        else:
+                        else: # Should be a dict, but handle direct value if structure changes
                             try:
                                 numeric_value = float(str(values).replace('%', ''))
                             except (ValueError, TypeError):
@@ -639,17 +637,17 @@ class SQLiteOutputHandler(OutputHandler):
 
                     if details_to_insert:
                         conn.executemany('''
-                        INSERT INTO analysis_details
-                        (result_id, category, detail_type, detail_value, numeric_value)
-                        VALUES (?, ?, ?, ?, ?)
+                            INSERT INTO analysis_details
+                            (result_id, category, detail_type, detail_value, numeric_value)
+                            VALUES (?, ?, ?, ?, ?)
                         ''', details_to_insert)
 
                 success_count += 1
-                self.row_count += 1
+                self.row_count += 1 # This might need locking if other threads could modify it, but it's only modified by worker.
 
-            except Exception as e: # Catch errors per row
-                error_count += 1
-                self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
+        except Exception as e: # Catch errors per row
+            error_count += 1
+            self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
 
             # Update batch statistics
             conn.execute('''
