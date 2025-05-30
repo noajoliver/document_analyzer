@@ -139,6 +139,37 @@ class CSVOutputHandler(OutputHandler):
         self._csv_header_comments_written_for_current_file = False
         # _ensure_descriptions_written is called by super().__init__
 
+    def _flatten_row_for_csv(self, row_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Flattens a single row, especially the 'Analysis Details' part,
+        and ensures all columns from self._fieldnames are present."""
+        flattened_row = {}
+        analysis_details = row_dict.get("Analysis Details", {})
+        text_details = analysis_details.get("Text", {})
+        image_details = analysis_details.get("Image", {})
+        margins_used = analysis_details.get("Margins Used", {})
+
+        for col_name in self._fieldnames:
+            if col_name in row_dict:
+                flattened_row[col_name] = row_dict[col_name]
+            elif col_name == "text_top_content_percentage":
+                flattened_row[col_name] = text_details.get("Top Content", "")
+            elif col_name == "text_bottom_content_percentage":
+                flattened_row[col_name] = text_details.get("Bottom Content", "")
+            elif col_name == "image_top_content_percentage":
+                flattened_row[col_name] = image_details.get("Top Content", "")
+            elif col_name == "image_bottom_content_percentage":
+                flattened_row[col_name] = image_details.get("Bottom Content", "")
+            elif col_name == "total_margin_content_percentage": # Specific to images
+                flattened_row[col_name] = image_details.get("Total Margin Content", "")
+            elif col_name == "margins_used_top_margin_percentage":
+                flattened_row[col_name] = margins_used.get("Top Margin (%)", "")
+            elif col_name == "margins_used_bottom_margin_percentage":
+                flattened_row[col_name] = margins_used.get("Bottom Margin (%)", "")
+            else:
+                flattened_row[col_name] = row_dict.get(col_name, "") # Default to empty string for missing values
+
+        return flattened_row
+
     def _open_new_csv_part(self):
         """Closes existing CSV part if open, and opens a new one."""
         if self.csv_file:
@@ -246,7 +277,9 @@ class CSVOutputHandler(OutputHandler):
         # Write actual data
         if self.writer and processed_results:
             try:
-                self.writer.writerows(processed_results)
+                # Flatten results before writing
+                flattened_results = [self._flatten_row_for_csv(row) for row in processed_results]
+                self.writer.writerows(flattened_results)
                 self.total_rows_written_for_current_file += len(processed_results)
                 if self.csv_file:
                     self.csv_file.flush() # Ensure data is written to disk
@@ -453,7 +486,7 @@ class SQLiteOutputHandler(OutputHandler):
         try:
             # Main results table
             conn.execute('''
-                CREATE TABLE IF NOT EXISTS analysis_results (
+            CREATE TABLE IF NOT EXISTS analysis_results (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         file_path TEXT NOT NULL,
                         page_number INTEGER,
@@ -468,11 +501,11 @@ class SQLiteOutputHandler(OutputHandler):
                         processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         batch_id INTEGER
                     )
-                ''')
+            ''')
 
             # Analysis details table
             conn.execute('''
-                    CREATE TABLE IF NOT EXISTS analysis_details (
+            CREATE TABLE IF NOT EXISTS analysis_details (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         result_id INTEGER NOT NULL,
                         category TEXT NOT NULL,
@@ -482,11 +515,11 @@ class SQLiteOutputHandler(OutputHandler):
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         FOREIGN KEY(result_id) REFERENCES analysis_results(id) ON DELETE CASCADE
                     )
-                ''')
+            ''')
 
             # Processing stats table
             conn.execute('''
-                    CREATE TABLE IF NOT EXISTS processing_stats (
+            CREATE TABLE IF NOT EXISTS processing_stats (
                         batch_id INTEGER PRIMARY KEY AUTOINCREMENT,
                         start_time TIMESTAMP,
                         end_time TIMESTAMP,
@@ -494,26 +527,26 @@ class SQLiteOutputHandler(OutputHandler):
                         success_count INTEGER,
                         error_count INTEGER
                     )
-                ''')
+            ''')
 
             # Metadata table
             conn.execute('''
-                    CREATE TABLE IF NOT EXISTS analysis_metadata (
+            CREATE TABLE IF NOT EXISTS analysis_metadata (
                         key TEXT NOT NULL,
                         value TEXT,
                         version INTEGER DEFAULT 1,
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         PRIMARY KEY (key, version)
                     )
-                ''')
+            ''')
 
             # Create initial indexes
             conn.execute('CREATE INDEX IF NOT EXISTS idx_file_path ON analysis_results(file_path)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_content_status ON analysis_results(content_status)')
             conn.execute('CREATE INDEX IF NOT EXISTS idx_details_result ON analysis_details(result_id)')
 
-            # Store initial metadata
-            self._store_metadata(conn) # Store other metadata
+            # Store initial metadata - The call to self._store_metadata(conn) was here and is being removed
+            # as its logic is now integrated below.
 
         except sqlite3.Error as e:
             self.logger.error(f"Failed to initialize SQLite database schema: {e}", exc_info=True)
@@ -522,37 +555,38 @@ class SQLiteOutputHandler(OutputHandler):
         # Column Descriptions Table (moved into _perform_init_schema)
         descriptions_table_name = "output_column_descriptions"
         try:
-            cursor = conn.cursor()
+            cursor = conn.cursor() # This line was indented one level too far.
             cursor.execute(f'''
-                CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
-                    column_name TEXT PRIMARY KEY,
-                    description TEXT
-                )
+            CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
+                column_name TEXT PRIMARY KEY,
+                description TEXT
+            )
             ''')
             for col_name, desc_text in COLUMN_DESCRIPTIONS.items():
                 cursor.execute(f'''
-                    INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
-                    VALUES (?, ?)
+                INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
+                VALUES (?, ?)
                 ''', (col_name, desc_text))
-            conn.commit()
+            conn.commit() # Commit after populating descriptions
             self.logger.info(f"Ensured '{descriptions_table_name}' table exists and is populated.")
         except sqlite3.Error as e:
-            self.logger.error(f"Error creating/populating metadata table '{descriptions_table_name}': {e}", exc_info=True)
-            # Do not raise here
+            self.logger.error(f"Error creating/populating column descriptions table '{descriptions_table_name}': {e}", exc_info=True)
 
-        # Store initial metadata (moved into _perform_init_schema)
+        # Store initial analysis metadata (distinct from column descriptions)
         try:
-            metadata = self.get_metadata_dict()
-            # total_records will be 0 initially, can be updated later if needed via a separate task
-            metadata['total_records'] = 0
-            metadata['schema_created_at'] = datetime.now().isoformat()
+            metadata_to_store = self.get_metadata_dict()
+            # total_records will be 0 initially, can be updated later if needed via a separate task or at the end
+            metadata_to_store['total_records_processed_in_db'] = 0
+            metadata_to_store['schema_version'] = "1.0" # Example of schema versioning
 
+            # Using INSERT OR REPLACE for simplicity for this initial metadata.
+            # For versioning, a more complex strategy might be needed if multiple versions of metadata are stored.
             conn.executemany(
-                '''INSERT OR REPLACE INTO analysis_metadata (key, value)
-                   VALUES (?, ?)''', # Using INSERT OR REPLACE for simplicity for initial metadata
-                [(k, json.dumps(v)) for k, v in metadata.items()]
+                '''INSERT OR REPLACE INTO analysis_metadata (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)''',
+                [(k, json.dumps(v)) for k, v in metadata_to_store.items()]
             )
-            conn.commit()
+            conn.commit() # Commit after storing analysis metadata
             self.logger.info("Initial analysis metadata stored in SQLite.")
         except sqlite3.Error as e:
             self.logger.error(f"Error storing initial analysis metadata in SQLite: {e}", exc_info=True)
@@ -572,8 +606,8 @@ class SQLiteOutputHandler(OutputHandler):
             # Create batch record in processing_stats
             cursor = conn.cursor() # Obtain a cursor from the connection
             cursor.execute('''
-                INSERT INTO processing_stats (start_time, records_processed)
-                VALUES (?, ?)
+            INSERT INTO processing_stats (start_time, records_processed)
+            VALUES (?, ?)
             ''', (batch_start_time, len(batch_data)))
             batch_id = cursor.lastrowid
 
@@ -588,20 +622,21 @@ class SQLiteOutputHandler(OutputHandler):
                     rel_path = os.path.abspath(result['File'])
 
                 file_size = 0
-                if os.path.exists(result['File']):
+                if os.path.exists(result['File']): # Check existence before getting size
                     try:
                         file_size = os.path.getsize(result['File'])
-                    except OSError: # Handle potential race condition if file is deleted
-                        pass
+                    except OSError: # Handle potential race condition if file is deleted after check
+                        self.logger.warning(f"Could not get size for file (it may have been deleted): {result['File']}")
+                        pass # Keep file_size as 0
 
 
                 # Insert main result
                 cursor.execute('''
-                    INSERT INTO analysis_results
-                    (file_path, page_number, content_status, text_status,
-                     image_status, file_type, error_message, error_severity,
-                     relative_path, file_size, batch_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO analysis_results
+                (file_path, page_number, content_status, text_status,
+                 image_status, file_type, error_message, error_severity,
+                 relative_path, file_size, batch_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     result['File'],
                     result.get('Page', 1),
@@ -628,7 +663,7 @@ class SQLiteOutputHandler(OutputHandler):
                                 except (ValueError, TypeError):
                                     numeric_value = None
                                 details_to_insert.append((result_id, category, key, str(value_item), numeric_value))
-                        else: # Should be a dict, but handle direct value if structure changes
+                        else:
                             try:
                                 numeric_value = float(str(values).replace('%', ''))
                             except (ValueError, TypeError):
@@ -637,17 +672,17 @@ class SQLiteOutputHandler(OutputHandler):
 
                     if details_to_insert:
                         conn.executemany('''
-                            INSERT INTO analysis_details
-                            (result_id, category, detail_type, detail_value, numeric_value)
-                            VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO analysis_details
+                        (result_id, category, detail_type, detail_value, numeric_value)
+                        VALUES (?, ?, ?, ?, ?)
                         ''', details_to_insert)
 
                 success_count += 1
-                self.row_count += 1 # This might need locking if other threads could modify it, but it's only modified by worker.
+                self.row_count += 1
 
-        except Exception as e: # Catch errors per row
-            error_count += 1
-            self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
+            except Exception as e: # Catch errors per row
+                error_count += 1
+                self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
 
             # Update batch statistics
             conn.execute('''
