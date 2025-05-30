@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProcessingStats:
     """Tracks processing statistics and timing"""
-    total_processed: int = 0
+    total_processed: int = 0 # Total items for which processing was attempted
     successful: int = 0
     failed: int = 0
     start_time: Optional[float] = None
@@ -53,14 +53,25 @@ class ProcessingStats:
     recent_rates: List[float] = field(default_factory=lambda: [])
     pause_time: Optional[float] = None
     total_pause_duration: float = 0.0
+    total_items_for_etr: int = 0 # Total items in the current run (after sampling) for ETR
 
-    def start(self):
-        """Start or restart processing timer"""
+    def start(self, total_items_to_process: int = 0):
+        """Start or restart processing timer."""
         self.start_time = time.time()
         self.last_update_time = self.start_time
         self.recent_rates.clear()
         self.total_pause_duration = 0.0
         self.pause_time = None
+        self.total_processed = 0 # Reset attempted count
+        self.successful = 0
+        self.failed = 0
+        self.total_items_for_etr = total_items_to_process
+
+    def increment_successful(self):
+        self.successful += 1
+
+    def increment_failed(self):
+        self.failed += 1
 
     def pause(self):
         """Record pause start time"""
@@ -132,15 +143,12 @@ class ProcessingStats:
         """
         Calculate and format estimated time remaining
 
-        Args:
-            total_files: Total number of files to process
-
         Returns:
             str: Formatted time remaining estimate
         """
         try:
-            if (not self.start_time or self.total_processed == 0 or self.pause_time):
-                logger.debug("ProcessingStats: Conditions not met for ETA calculation (start_time, total_processed, or paused).")
+            if (not self.start_time or self.total_processed == 0 or self.pause_time or self.total_items_for_etr == 0):
+                logger.debug("ProcessingStats: Conditions not met for ETA (start_time, total_processed, paused, or no items for ETR).")
                 return "Calculating..."
 
             if not self.recent_rates:
@@ -152,7 +160,7 @@ class ProcessingStats:
                 logger.debug(f"ProcessingStats: Average rate is {avg_rate}, cannot calculate ETA.")
                 return "Calculating..."
 
-            remaining_files = total_files - self.total_processed
+            remaining_files = self.total_items_for_etr - self.total_processed
             estimated_seconds = remaining_files / avg_rate
 
             # Format time remaining
@@ -1639,11 +1647,24 @@ class DocumentAnalyzerGUI:
                     # Handle both single results and lists of results
                     if isinstance(file_results, list):
                         results.extend(file_results)
-                    else:
+                        # Check if any page in the PDF failed
+                        if any(res.get("Error") or "failed" in res.get("Content Status", "").lower() for res in file_results):
+                            self.processing_stats.increment_failed()
+                        else:
+                            self.processing_stats.increment_successful()
+                    elif isinstance(file_results, dict):
                         results.append(file_results)
+                        if file_results.get("Error") or "failed" in file_results.get("Content Status", "").lower():
+                            self.processing_stats.increment_failed()
+                        else:
+                            self.processing_stats.increment_successful()
+                    # If file_results is None, it means processing failed at a higher level or was skipped
+                    elif file_results is None:
+                         self.processing_stats.increment_failed()
 
-                processed_count += 1
-                progress = (processed_count / total_files) * 100
+                processed_count += 1 # This is the count of files attempted from the files_to_process list
+                self.processing_stats.update(processed_count) # Update total_processed for rate calculation
+                progress = (processed_count / total_files) * 100 # total_files here is len(files_to_process)
                 self.queue.put(("progress", progress))
                 self.queue.put(("status", f"Processed {processed_count:,} of {total_files:,} files"))
 
@@ -2159,7 +2180,8 @@ class DocumentAnalyzerGUI:
                 self.include_images.get(),
                 self.SUPPORTED_FORMATS,
                 options=self.processing_options,
-                progress_callback=lambda msg: self.log_message(msg) if trigger != "checkbox" else None
+                progress_callback=lambda msg: logger.debug(msg) if trigger != "checkbox" else None
+            progress_callback=lambda msg: logger.debug(msg)
             )
 
             total_files = len(files)
@@ -2295,14 +2317,14 @@ class DocumentAnalyzerGUI:
     def complete_analysis(self) -> None:
         """Handle analysis completion and error reporting"""
         try:
-            # Get error information
+            # Log final statistics using the ProcessingStats object
+            self.log_final_statistics() # This will now use self.processing_stats
+
+            # Get error information from ErrorHandler for detailed error reporting (optional)
             error_summary = self.error_handler.get_error_summary()
             critical_errors = self.error_handler.get_critical_errors()
 
-            # Log final statistics
-            self.log_final_statistics()
-
-            # Log error summary if there are any errors
+            # Log error summary if there are any errors logged by ErrorHandler
             if error_summary:
                 self.log_message("\nError Summary:")
                 for category, count in error_summary.items():
@@ -2320,41 +2342,27 @@ class DocumentAnalyzerGUI:
             messagebox.showerror("Error", "Failed to complete analysis summary.")
 
     def log_final_statistics(self):
-        """Log final processing statistics"""
-        stats = self.calculate_processing_stats()
-
+        """Log final processing statistics using self.processing_stats"""
         self.log_message("\nProcessing Statistics:")
-        self.log_message(f"Total Files Processed: {stats['total_files']}")
-        self.log_message(f"Successful: {stats['successful']}")
-        self.log_message(f"Failed: {stats['failed']}")
+        self.log_message(f"Total Files Attempted: {self.processing_stats.total_processed}")
+        self.log_message(f"Successful: {self.processing_stats.successful}")
+        self.log_message(f"Failed: {self.processing_stats.failed}")
 
-        if stats['sampling_used']:
+        if self.settings.use_sampling or self.settings.use_random_n:
             self.log_message(f"\nSampling Information:")
-            self.log_message(f"Original Population: {stats['total_population']}")
-            self.log_message(f"Sample Size: {stats['sample_size']}")
-            self.log_message(f"Confidence Level: {stats['confidence_level']}%")
-            self.log_message(f"Margin of Error: {stats['margin_of_error']}%")
+            self.log_message(f"Original Population: {self.settings.total_files}") # Total before sampling
+            # self.processing_stats.total_items_for_etr is the number of items intended for processing in this run
+            self.log_message(f"Sample Size Planned: {self.processing_stats.total_items_for_etr}")
+            if self.settings.use_sampling: # Statistical sampling
+                cl_value = self.settings.confidence_level * 100
+                me_value = self.settings.margin_of_error * 100
+                self.log_message(f"Confidence Level: {cl_value:.0f}%")
+                self.log_message(f"Margin of Error: {me_value:.0f}%")
+            elif self.settings.use_random_n and self.settings.random_n_size is not None:
+                 self.log_message(f"Random N Size Specified: {self.settings.random_n_size}")
 
-    def calculate_processing_stats(self) -> Dict[str, Any]:
-        """Calculate processing statistics"""
-        stats = {
-            'total_files': len(self.error_handler.errors),
-            'successful': 0,
-            'failed': 0,
-            'sampling_used': self.settings.use_sampling,
-            'total_population': self.settings.total_files,
-            'sample_size': self.settings.sample_size,
-            'confidence_level': float(self.confidence_level.get()),
-            'margin_of_error': float(self.margin_of_error.get())
-        }
-
-        for error in self.error_handler.errors.values():
-            if error.severity == ErrorSeverity.CRITICAL:
-                stats['failed'] += 1
-            else:
-                stats['successful'] += 1
-
-        return stats
+    # The calculate_processing_stats method is now largely obsolete
+    # def calculate_processing_stats(self) -> Dict[str, Any]: ...
 
     def show_critical_errors(self, critical_errors: List[ProcessingError]):
         """Display critical errors in a message box"""
@@ -2537,7 +2545,47 @@ class DocumentAnalyzerGUI:
 
             # Initialize processing stats
             self.processing_stats = ProcessingStats()
-            self.processing_stats.start()
+            # Determine number of files for this run (after sampling)
+            num_actually_processing = 0
+            if self.settings.use_sampling and self.settings.sample_size is not None:
+                num_actually_processing = self.settings.sample_size
+            elif self.settings.use_random_n and self.settings.random_n_size is not None:
+                # This should be the actual count of files selected by random sampling,
+                # which is min(self.settings.random_n_size, total_files_before_sampling)
+                # For simplicity, using random_n_size, but more accurate would be len(files_to_process) after sampling.
+                # The files_to_process list is determined later in this method.
+                # We'll pass len(files_to_process) to start() call later.
+                pass # Will be set later
+            else: # No sampling
+                num_actually_processing = total_files # total_files here is before sampling files list is created
+
+            # Correct determination of files_to_process for the current run
+            files_to_process = []
+            if self.settings.use_sampling:
+                # Recalculate files_to_process based on sampling
+                # This is a bit redundant as prepare_file_list also does this.
+                # Consider streamlining later if possible.
+                params = SamplingParameters(
+                    confidence_level=self.settings.confidence_level,
+                    margin_of_error=self.settings.margin_of_error,
+                    population_size=total_files # Original total
+                )
+                sample_size_calculated = SamplingCalculator.calculate_sample_size(params)
+                files_to_process = SamplingCalculator.select_random_files(files, sample_size_calculated)
+                num_actually_processing = len(files_to_process)
+            elif self.settings.use_random_n:
+                n_size = self.settings.random_n_size if self.settings.random_n_size is not None else 0
+                files_to_process = SamplingCalculator.select_random_files(files, n_size)
+                num_actually_processing = len(files_to_process)
+            else:
+                files_to_process = files # No sampling, process all
+                num_actually_processing = len(files_to_process)
+
+            if not files_to_process: # If after sampling, no files are left
+                 messagebox.showwarning("No Files", "No files selected for processing after sampling.")
+                 return
+
+            self.processing_stats.start(total_items_to_process=num_actually_processing)
 
             # Initialize processing state
             self.processing = True
@@ -2731,14 +2779,15 @@ class DocumentAnalyzerGUI:
                             # Update processing stats and timing info
                             if hasattr(self, 'processing_stats'):
                                 processed_count = int(msg_data * self.settings.total_files / 100)
-                                self.processing_stats.update(processed_count)
+                                self.processing_stats.update(processed_count) # processed_count is items attempted in current batch
 
                                 # Update timing displays
                                 self.elapsed_var.set(
                                     f"Elapsed: {self.processing_stats.get_elapsed_time()}"
                                 )
                                 self.remaining_var.set(
-                                    f"Remaining: {self.processing_stats.get_estimated_time_remaining(self.settings.total_files)}"
+                                    # get_estimated_time_remaining now uses internal total_items_for_etr
+                                    f"Remaining: {self.processing_stats.get_estimated_time_remaining()}"
                                 )
                                 self.rate_var.set(
                                     self.processing_stats.get_processing_rate()

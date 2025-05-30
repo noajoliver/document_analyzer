@@ -439,9 +439,15 @@ class PageAnalyzer:
                     "Content Status": content_status,
                     "Type": "Image",
                     "Analysis Details": {
-                        "Top Content": f"{analysis.top_content_percentage:.1f}%",
-                        "Bottom Content": f"{analysis.bottom_content_percentage:.1f}%",
-                        "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
+                        "Image": { # Added "Image" sub-key
+                            "Top Content": f"{analysis.top_content_percentage:.1f}%",
+                            "Bottom Content": f"{analysis.bottom_content_percentage:.1f}%",
+                            "Total Margin Content": f"{analysis.total_content_percentage:.1f}%"
+                        },
+                        "Margins Used": {
+                            "Top Margin (%)": self.settings.top_margin_percent,
+                            "Bottom Margin (%)": self.settings.bottom_margin_percent
+                        }
                     }
                 }
         except (IOError, OSError) as ioe: # Specific errors for image opening issues
