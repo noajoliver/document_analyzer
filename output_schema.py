@@ -32,6 +32,24 @@ COLUMN_DESCRIPTIONS = {
     "Error Severity": "Indicates the severity of the encountered error (e.g., WARNING, ERROR). Blank if no error occurred."
 }
 
+ORDERED_COLUMN_NAMES = [
+    "File",
+    "Page",
+    "Type",
+    "Content Status",
+    "Text Status",
+    "Image Status",
+    "text_top_content_percentage",
+    "text_bottom_content_percentage",
+    "image_top_content_percentage",
+    "image_bottom_content_percentage",
+    "total_margin_content_percentage",
+    "margins_used_top_margin_percentage",
+    "margins_used_bottom_margin_percentage",
+    "Error",
+    "Error Severity"
+]
+
 # Future extension: Could also include data types, example values, etc.
 # For now, just descriptions.
 

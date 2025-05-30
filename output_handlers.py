@@ -16,12 +16,17 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 import csv
 import json
 import os
+import csv
+import json
+import os
 import sqlite3
 import logging
+import queue
+import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from threading import Lock
-from output_schema import COLUMN_DESCRIPTIONS, get_column_description
+from output_schema import COLUMN_DESCRIPTIONS, get_column_description, ORDERED_COLUMN_NAMES
 from typing import List, Dict, Any, Optional
 
 import pandas as pd
@@ -79,15 +84,24 @@ class OutputHandler:
     def _ensure_descriptions_written(self):
         if not self._descriptions_written:
             self._write_column_descriptions_file()
-            self._descriptions_written = True
+            self._write_column_descriptions_file()
+            # The _descriptions_written flag is now set inside _write_column_descriptions_file
+            # or if the file already exists, to prevent re-checks.
+            # self._descriptions_written = True # This line will be effectively handled by the logic below
 
     def _write_column_descriptions_file(self):
         if not self.output_path: # Should not happen if constructor is used properly
             self.logger.warning("Output path not set, cannot write column descriptions file.")
+            self._descriptions_written = False # Ensure it can be retried if path becomes available
             return
 
         base, _ = os.path.splitext(self.output_path)
         desc_file_path = base + "_column_descriptions.txt"
+
+        if os.path.exists(desc_file_path):
+            self.logger.debug(f"Column descriptions file {desc_file_path} already exists. Skipping write.")
+            self._descriptions_written = True # Mark as "handled" because the file is present
+            return
 
         try:
             with open(desc_file_path, "w", encoding="utf-8") as f:
@@ -96,8 +110,10 @@ class OutputHandler:
                     f.write(f"Column Name: {col_name}\n")
                     f.write(f"Description: {desc}\n\n")
             self.logger.info(f"Successfully wrote column descriptions to {desc_file_path}")
+            self._descriptions_written = True # Mark as written
         except IOError as e:
             self.logger.error(f"Failed to write column descriptions file to {desc_file_path}: {e}", exc_info=True)
+            self._descriptions_written = False # Allow retry if it failed
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
         """Write a batch of results to the output"""
@@ -117,7 +133,7 @@ class CSVOutputHandler(OutputHandler):
         super().__init__(output_path, settings)
         self.current_file_number = 1
         self.total_rows_written_for_current_file = 0 # Renamed for clarity
-        self._fieldnames = []
+        self._fieldnames = ORDERED_COLUMN_NAMES # Use predefined order
         self.csv_file = None
         self.writer = None
         self._csv_header_comments_written_for_current_file = False
@@ -127,7 +143,7 @@ class CSVOutputHandler(OutputHandler):
         """Closes existing CSV part if open, and opens a new one."""
         if self.csv_file:
             self.csv_file.close()
-        
+
         output_file_path = self.get_next_filename()
         self.logger.info(f"Opening new CSV part: {output_file_path}")
         self.csv_file = open(output_file_path, 'w', newline='', encoding='utf-8')
@@ -190,11 +206,12 @@ class CSVOutputHandler(OutputHandler):
             return None
 
         # Determine fieldnames from the first record if not already set
-        if not self._fieldnames and processed_results:
-            self._fieldnames = list(processed_results[0].keys())
-            # If writer was None because fieldnames weren't known, create it now
-            if self.csv_file and not self.writer:
-                 self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
+        # This logic is removed as _fieldnames is set in __init__
+        # if not self._fieldnames and processed_results:
+        #     self._fieldnames = list(processed_results[0].keys())
+        #     # If writer was None because fieldnames weren't known, create it now
+        #     if self.csv_file and not self.writer:
+        #          self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
 
 
         # Handle file splitting
@@ -218,10 +235,10 @@ class CSVOutputHandler(OutputHandler):
                     brief_desc = description.split('.')[0] + "." if '.' in description else description
                     self.csv_file.write(f"# {fieldname}: {brief_desc}\n")
                 self.csv_file.write("\n") # Blank line after comments
-                
+
                 if not self.writer and self._fieldnames: # Ensure writer is created if it wasn't (e.g. first batch was empty)
                     self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
-                
+
                 if self.writer:
                     self.writer.writeheader()
                 self._csv_header_comments_written_for_current_file = True
@@ -236,7 +253,7 @@ class CSVOutputHandler(OutputHandler):
             except Exception as e:
                 self.logger.error(f"Error writing CSV rows: {e}", exc_info=True)
                 # Decide if we should re-raise or handle
-        
+
         if is_final:
             if self.csv_file:
                 self.csv_file.close()
@@ -378,15 +395,49 @@ class SQLiteOutputHandler(OutputHandler):
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.output_path = f"{os.path.splitext(output_path)[0]}.db"
-        self.batch_size = 1000 # Batch size for SQLite inserts
         self.row_count = 0
-        self.conn = self._get_connection() # Persistent connection for the lifetime of the handler
-        self.connection_lock = Lock() # To ensure thread-safe operations on self.conn
-        self._metadata_table_created = False
-        self.setup_database() # Initial schema setup
-        self._create_and_populate_column_descriptions_table() # Create/populate descriptions table
+        self.db_queue = queue.Queue()
+        self.db_worker_thread = threading.Thread(target=self._db_worker_loop, daemon=True)
+        self.db_worker_thread.start()
+        self.db_queue.put({'type': 'init_schema'})
 
-    def _get_connection(self) -> sqlite3.Connection:
+    def _db_worker_loop(self):
+        conn = None
+        try:
+            conn = sqlite3.connect(self.output_path) # Default check_same_thread=True is fine
+            self._perform_init_schema(conn) # Initial schema setup
+
+            while True:
+                task = self.db_queue.get()
+                if task is None or task.get('type') == 'close':
+                    self.db_queue.task_done()
+                    break
+
+                try:
+                    if task['type'] == 'write':
+                        self._perform_write_batch(conn, task['data'])
+                    elif task['type'] == 'init_schema': # Already called, but can be a no-op or re-entrant
+                        self._perform_init_schema(conn)
+                except Exception as e:
+                    self.logger.error(f"Error processing DB task {task.get('type')}: {e}", exc_info=True)
+                finally:
+                    self.db_queue.task_done()
+        except sqlite3.Error as e:
+            self.logger.error(f"SQLite worker thread error: {e}", exc_info=True)
+        finally:
+            if conn:
+                try:
+                    conn.commit() # Final commit
+                except sqlite3.Error as e:
+                    self.logger.error(f"SQLite worker: Error during final commit: {e}", exc_info=True)
+                try:
+                    conn.close()
+                except sqlite3.Error as e:
+                    self.logger.error(f"SQLite worker: Error closing connection: {e}", exc_info=True)
+            self.logger.info("SQLite worker thread finished and connection closed.")
+
+
+    def _get_connection_UNUSED(self) -> sqlite3.Connection: # Renamed as it's no longer directly used by handler instance
         """Create or return a database connection with appropriate settings"""
         conn = sqlite3.connect(self.output_path, timeout=60)
         conn.execute("PRAGMA foreign_keys = ON")
@@ -397,13 +448,12 @@ class SQLiteOutputHandler(OutputHandler):
         conn.execute("PRAGMA busy_timeout = 30000")
         return conn
 
-    def setup_database(self):
-        """Initialize database schema, excluding column descriptions table which is handled separately."""
+    def _perform_init_schema(self, conn: sqlite3.Connection):
+        """Initialize database schema, including column descriptions table."""
         try:
-            with self.connection_lock, self.conn as conn: # Use the persistent connection
-                # Main results table
-                conn.execute('''
-                    CREATE TABLE IF NOT EXISTS analysis_results (
+            # Main results table
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS analysis_results (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
                         file_path TEXT NOT NULL,
                         page_number INTEGER,
@@ -467,185 +517,183 @@ class SQLiteOutputHandler(OutputHandler):
 
         except sqlite3.Error as e:
             self.logger.error(f"Failed to initialize SQLite database schema: {e}", exc_info=True)
-            raise IOError(f"Failed to initialize SQLite database schema: {str(e)}")
+            # Do not raise here, as worker loop handles exceptions
 
-    def _create_and_populate_column_descriptions_table(self):
-        if self._metadata_table_created:
-            return
-
+        # Column Descriptions Table (moved into _perform_init_schema)
         descriptions_table_name = "output_column_descriptions"
         try:
-            with self.connection_lock, self.conn as conn: # Use the persistent connection
-                cursor = conn.cursor()
+            cursor = conn.cursor()
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
+                    column_name TEXT PRIMARY KEY,
+                    description TEXT
+                )
+            ''')
+            for col_name, desc_text in COLUMN_DESCRIPTIONS.items():
                 cursor.execute(f'''
-                    CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
-                        column_name TEXT PRIMARY KEY,
-                        description TEXT
-                    )
-                ''')
-                
-                for col_name, desc in COLUMN_DESCRIPTIONS.items():
-                    cursor.execute(f'''
-                        INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
-                        VALUES (?, ?)
-                    ''', (col_name, desc))
-                
-                conn.commit()
-            self._metadata_table_created = True
+                    INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
+                    VALUES (?, ?)
+                ''', (col_name, desc_text))
+            conn.commit()
             self.logger.info(f"Ensured '{descriptions_table_name}' table exists and is populated.")
         except sqlite3.Error as e:
             self.logger.error(f"Error creating/populating metadata table '{descriptions_table_name}': {e}", exc_info=True)
+            # Do not raise here
+
+        # Store initial metadata (moved into _perform_init_schema)
+        try:
+            metadata = self.get_metadata_dict()
+            # total_records will be 0 initially, can be updated later if needed via a separate task
+            metadata['total_records'] = 0
+            metadata['schema_created_at'] = datetime.now().isoformat()
+
+            conn.executemany(
+                '''INSERT OR REPLACE INTO analysis_metadata (key, value)
+                   VALUES (?, ?)''', # Using INSERT OR REPLACE for simplicity for initial metadata
+                [(k, json.dumps(v)) for k, v in metadata.items()]
+            )
+            conn.commit()
+            self.logger.info("Initial analysis metadata stored in SQLite.")
+        except sqlite3.Error as e:
+            self.logger.error(f"Error storing initial analysis metadata in SQLite: {e}", exc_info=True)
 
 
-    def _store_metadata(self, conn: sqlite3.Connection):
-        """Store analysis metadata with versioning (excluding column descriptions)"""
-        metadata = self.get_metadata_dict()
-        # self.row_count might not be final here if called before all batches are written
-        # Consider moving total_records update to when is_final is true in write_batch
-        metadata['total_records'] = self.row_count 
-        metadata['completed_at'] = datetime.now().isoformat()
-
-        conn.executemany(
-            '''INSERT INTO analysis_metadata (key, value, version)
-               VALUES (?, ?, (SELECT COALESCE(MAX(version), 0) + 1 
-                            FROM analysis_metadata WHERE key = ?))''',
-            [(k, json.dumps(v), k) for k, v in metadata.items()]
-        )
-
-    def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
-        """Write a batch of results to SQLite database"""
-        if not batch and not is_final:
-            return None
+    def _perform_write_batch(self, conn: sqlite3.Connection, batch_data: List[Dict[str, Any]]):
+        """Performs the actual database write operations for a batch."""
+        if not batch_data:
+            return
 
         try:
-            with self.connection_lock, self.conn as conn: # Use the persistent connection
-                batch_start_time = datetime.now()
-                success_count = 0
-                error_count = 0
+            batch_start_time = datetime.now()
+            success_count = 0
+            error_count = 0
 
                     # Create batch record
-                    cursor = conn.execute('''
-                        INSERT INTO processing_stats (start_time, records_processed)
-                        VALUES (?, ?)
-                    ''', (batch_start_time, len(batch)))
-                    batch_id = cursor.lastrowid
+            # Create batch record in processing_stats
+            cursor = conn.cursor() # Obtain a cursor from the connection
+            cursor.execute('''
+                INSERT INTO processing_stats (start_time, records_processed)
+                VALUES (?, ?)
+            ''', (batch_start_time, len(batch_data)))
+            batch_id = cursor.lastrowid
 
-                    # Process each result
-                    for result in batch:
-                        try:
-                            rel_path = os.path.relpath(
-                                os.path.abspath(result['File']),
-                                os.path.dirname(self.output_path)
-                            )
-                        except ValueError:
-                            # If we're on different Windows drive letters, relpath raises ValueError.
-                            # In that case, just store the full absolute path so we don't skip the row:
-                            rel_path = os.path.abspath(result['File'])
-                            file_size = os.path.getsize(result['File']) if os.path.exists(result['File']) else 0
+            # Process each result
+            for result in batch_data:
+                try:
+                    rel_path = os.path.relpath(
+                        os.path.abspath(result['File']),
+                        os.path.dirname(self.output_path)
+                    )
+                except ValueError:
+                    rel_path = os.path.abspath(result['File'])
 
-                            # Insert main result
-                            cursor = conn.execute('''
-                                INSERT INTO analysis_results 
-                                (file_path, page_number, content_status, text_status,
-                                 image_status, file_type, error_message, error_severity,
-                                 relative_path, file_size, batch_id)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            ''', (
-                                result['File'],
-                                result.get('Page', 1),
-                                result['Content Status'],
-                                result.get('Text Status', ''),
-                                result.get('Image Status', ''),
-                                result.get('Type', 'Unknown'),
-                                result.get('Error'),
-                                result.get('Error Severity'),
-                                rel_path,
-                                file_size,
-                                batch_id
-                            ))
-                            result_id = cursor.lastrowid
+                file_size = 0
+                if os.path.exists(result['File']):
+                    try:
+                        file_size = os.path.getsize(result['File'])
+                    except OSError: # Handle potential race condition if file is deleted
+                        pass
 
-                            # Process analysis details
-                            if 'Analysis Details' in result:
-                                details = []
-                                for category, values in result['Analysis Details'].items():
-                                    if isinstance(values, dict):
-                                        for key, value in values.items():
-                                            try:
-                                                numeric_value = float(str(value).replace('%', ''))
-                                            except (ValueError, TypeError):
-                                                numeric_value = None
-                                            details.append((
-                                                result_id,
-                                                category,
-                                                key,
-                                                str(value),
-                                                numeric_value
-                                            ))
-                                    else:
-                                        try:
-                                            numeric_value = float(str(values).replace('%', ''))
-                                        except (ValueError, TypeError):
-                                            numeric_value = None
-                                        details.append((
-                                            result_id,
-                                            category,
-                                            'value',
-                                            str(values),
-                                            numeric_value
-                                        ))
 
-                                if details:
-                                    conn.executemany('''
-                                        INSERT INTO analysis_details 
-                                        (result_id, category, detail_type, detail_value, numeric_value)
-                                        VALUES (?, ?, ?, ?, ?)
-                                    ''', details)
+                # Insert main result
+                cursor.execute('''
+                    INSERT INTO analysis_results
+                    (file_path, page_number, content_status, text_status,
+                     image_status, file_type, error_message, error_severity,
+                     relative_path, file_size, batch_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    result['File'],
+                    result.get('Page', 1),
+                    result['Content Status'],
+                    result.get('Text Status', ''),
+                    result.get('Image Status', ''),
+                    result.get('Type', 'Unknown'),
+                    result.get('Error'),
+                    result.get('Error Severity'),
+                    rel_path,
+                    file_size,
+                    batch_id
+                ))
+                result_id = cursor.lastrowid
 
-                            success_count += 1
-                            self.row_count += 1
+                # Process analysis details
+                if 'Analysis Details' in result and isinstance(result['Analysis Details'], dict):
+                    details_to_insert = []
+                    for category, values in result['Analysis Details'].items():
+                        if isinstance(values, dict):
+                            for key, value_item in values.items():
+                                try:
+                                    numeric_value = float(str(value_item).replace('%', ''))
+                                except (ValueError, TypeError):
+                                    numeric_value = None
+                                details_to_insert.append((result_id, category, key, str(value_item), numeric_value))
+                        else: # Should be a dict, but handle direct value if structure changes
+                            try:
+                                numeric_value = float(str(values).replace('%', ''))
+                            except (ValueError, TypeError):
+                                numeric_value = None
+                            details_to_insert.append((result_id, category, 'value', str(values), numeric_value))
 
-                        except Exception as e:
-                            error_count += 1
-                            print(f"Error processing result: {str(e)}")
+                    if details_to_insert:
+                        conn.executemany('''
+                            INSERT INTO analysis_details
+                            (result_id, category, detail_type, detail_value, numeric_value)
+                            VALUES (?, ?, ?, ?, ?)
+                        ''', details_to_insert)
 
-                    # Update batch statistics
-                    conn.execute('''
-                        UPDATE processing_stats 
-                        SET end_time = ?, success_count = ?, error_count = ?
-                        WHERE batch_id = ?
-                    ''', (datetime.now(), success_count, error_count, batch_id))
+                success_count += 1
+                self.row_count += 1 # This might need locking if other threads could modify it, but it's only modified by worker.
 
-                    # Final operations
-                    if is_final:
-                        self._store_metadata(conn)
-                        self._create_final_indexes(conn)
+            except Exception as e: # Catch errors per row
+                error_count += 1
+                self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
 
-            return self.output_path
+            # Update batch statistics
+            conn.execute('''
+                UPDATE processing_stats
+                SET end_time = ?, success_count = ?, error_count = ?
+                WHERE batch_id = ?
+            ''', (datetime.now(), success_count, error_count, batch_id))
+
+            conn.commit() # Commit after each batch
+            self.logger.debug(f"SQLite batch written. Success: {success_count}, Errors: {error_count}")
 
         except sqlite3.Error as e:
-            raise IOError(f"Error writing to SQLite database: {str(e)}")
+            self.logger.error(f"Error writing batch to SQLite: {e}", exc_info=True)
+            # Optionally rollback, though auto-commit might handle some cases or commit might fail
+            try:
+                conn.rollback()
+            except sqlite3.Error as re:
+                 self.logger.error(f"Rollback failed: {re}", exc_info=True)
+        # Removed specific _create_final_indexes and _store_metadata calls from here,
+        # as they are part of schema init or should be handled as separate queued tasks if dynamic.
 
-    def _create_final_indexes(self, conn: sqlite3.Connection):
-        """Create additional indexes after all data is loaded"""
-        try:
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_processed_at ON analysis_results(processed_at)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_batch_id ON analysis_results(batch_id)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_details_category ON analysis_details(category)')
-        except sqlite3.Error as e:
-            print(f"Warning: Failed to create final indexes: {str(e)}")
+    def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
+        """Queue a batch of results for writing to SQLite database."""
+        if not batch and not is_final: # Allow empty final batch to trigger cleanup/final commit in worker
+            return None
+
+        self.db_queue.put({'type': 'write', 'data': batch})
+
+        if is_final:
+            # Optionally, queue a task to update final metadata like total_records if needed
+            # self.db_queue.put({'type': 'finalize_metadata', 'total_records': self.row_count})
+            self.logger.info("All batches queued for SQLite. Finalizing.")
+
+        return self.output_path # Return path immediately, actual write is async
 
     def cleanup(self):
-        """Clean up resources"""
-        if self.conn:
-            try:
-                with self.connection_lock:
-                    self.conn.close()
-                self.logger.info("SQLite connection closed.")
-            except sqlite3.Error as e:
-                self.logger.error(f"Error closing SQLite connection: {e}", exc_info=True)
-            finally:
-                self.conn = None
+        """Signal the DB worker thread to close and wait for it."""
+        self.logger.info("SQLiteOutputHandler cleanup: Signaling DB worker to close.")
+        if hasattr(self, 'db_queue') and self.db_queue is not None:
+            self.db_queue.put(None) # Sentinel to stop the worker
+        if hasattr(self, 'db_worker_thread') and self.db_worker_thread.is_alive():
+            self.db_worker_thread.join(timeout=10) # Wait for worker to finish
+            if self.db_worker_thread.is_alive():
+                self.logger.warning("SQLite worker thread did not terminate in time.")
+        else:
+            self.logger.info("SQLite worker thread was not alive or not initialized.")
 
 
 def create_output_handler(output_format: str, output_path: str, settings: 'AnalysisSettings') -> OutputHandler:

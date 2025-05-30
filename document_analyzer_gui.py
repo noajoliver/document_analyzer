@@ -142,7 +142,7 @@ class ProcessingStats:
             if (not self.start_time or self.total_processed == 0 or self.pause_time):
                 logger.debug("ProcessingStats: Conditions not met for ETA calculation (start_time, total_processed, or paused).")
                 return "Calculating..."
-            
+
             if not self.recent_rates:
                 logger.debug("ProcessingStats: No recent rates available for ETA calculation.")
                 return "Calculating..."
