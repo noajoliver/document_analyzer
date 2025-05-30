@@ -17,9 +17,11 @@ import csv
 import json
 import os
 import sqlite3
+import logging
 from dataclasses import dataclass, asdict
 from datetime import datetime
 from threading import Lock
+from output_schema import COLUMN_DESCRIPTIONS, get_column_description
 from typing import List, Dict, Any, Optional
 
 import pandas as pd
@@ -59,6 +61,8 @@ class OutputHandler:
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         self.output_path = output_path
         self.settings = settings
+        self._descriptions_written = False # New flag
+        self.logger = logging.getLogger(__name__) # Assuming logger is available
         self.metadata = AnalysisMetadata(
             created_at=datetime.now().isoformat(),
             threshold=settings.threshold,
@@ -70,6 +74,30 @@ class OutputHandler:
             random_n_size=settings.random_n_size if settings.use_random_n else None,
             total_files=settings.total_files
         )
+        self._ensure_descriptions_written() # New call
+
+    def _ensure_descriptions_written(self):
+        if not self._descriptions_written:
+            self._write_column_descriptions_file()
+            self._descriptions_written = True
+
+    def _write_column_descriptions_file(self):
+        if not self.output_path: # Should not happen if constructor is used properly
+            self.logger.warning("Output path not set, cannot write column descriptions file.")
+            return
+
+        base, _ = os.path.splitext(self.output_path)
+        desc_file_path = base + "_column_descriptions.txt"
+
+        try:
+            with open(desc_file_path, "w", encoding="utf-8") as f:
+                f.write("Output Column Descriptions:\n\n")
+                for col_name, desc in COLUMN_DESCRIPTIONS.items():
+                    f.write(f"Column Name: {col_name}\n")
+                    f.write(f"Description: {desc}\n\n")
+            self.logger.info(f"Successfully wrote column descriptions to {desc_file_path}")
+        except IOError as e:
+            self.logger.error(f"Failed to write column descriptions file to {desc_file_path}: {e}", exc_info=True)
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
         """Write a batch of results to the output"""
@@ -88,8 +116,30 @@ class CSVOutputHandler(OutputHandler):
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.current_file_number = 1
-        self.total_rows_written = 0
-        # Removed the immediate self.write_metadata() call
+        self.total_rows_written_for_current_file = 0 # Renamed for clarity
+        self._fieldnames = []
+        self.csv_file = None
+        self.writer = None
+        self._csv_header_comments_written_for_current_file = False
+        # _ensure_descriptions_written is called by super().__init__
+
+    def _open_new_csv_part(self):
+        """Closes existing CSV part if open, and opens a new one."""
+        if self.csv_file:
+            self.csv_file.close()
+        
+        output_file_path = self.get_next_filename()
+        self.logger.info(f"Opening new CSV part: {output_file_path}")
+        self.csv_file = open(output_file_path, 'w', newline='', encoding='utf-8')
+        # Fieldnames should be set before calling this if possible,
+        # or DictWriter will be created/recreated when first batch for this part is written.
+        if self._fieldnames:
+            self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
+        else:
+            self.writer = None # Will be created once fieldnames are known
+        self._csv_header_comments_written_for_current_file = False
+        self.total_rows_written_for_current_file = 0
+
 
     def write_metadata(self):
         """Write metadata to a separate JSON file, including margin info."""
@@ -136,36 +186,73 @@ class CSVOutputHandler(OutputHandler):
 
         # Check if we need a new file
         current_batch_size = len(processed_results)
-        if self.total_rows_written + current_batch_size > self.settings.max_rows_per_file:
-            self.current_file_number += 1
-            self.total_rows_written = 0
+        if not processed_results and not is_final: # No data to write, not the end
+            return None
 
-        output_file = self.get_next_filename()
-        write_header = not os.path.exists(output_file) or self.total_rows_written == 0
+        # Determine fieldnames from the first record if not already set
+        if not self._fieldnames and processed_results:
+            self._fieldnames = list(processed_results[0].keys())
+            # If writer was None because fieldnames weren't known, create it now
+            if self.csv_file and not self.writer:
+                 self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
 
-        # Convert to DataFrame
-        df_batch = pd.DataFrame(processed_results)
-        # For Page column, ensure it's properly typed
-        if 'Page' in df_batch.columns:
-            df_batch['Page'] = df_batch['Page'].astype('Int64')
 
-        # Write to CSV
-        df_batch.to_csv(
-            output_file,
-            mode='a' if not write_header else 'w',
-            header=write_header,
-            index=False,
-            encoding='utf-8',
-            quoting=csv.QUOTE_MINIMAL
-        )
+        # Handle file splitting
+        # If current file is None (first batch ever) or max rows will be exceeded
+        if self.csv_file is None or \
+           (self.total_rows_written_for_current_file + len(processed_results) > self.settings.max_rows_per_file and self.settings.max_rows_per_file > 0):
+            if self.csv_file: # Close previous part if it exists
+                 self.csv_file.close()
+            if self.csv_file is not None: # Increment file number only if it's not the very first opening
+                self.current_file_number += 1
+            self._open_new_csv_part() # This sets self.csv_file, self.writer, resets counters
 
-        self.total_rows_written += current_batch_size
+        current_output_file_path = self.get_next_filename()
 
-        # If it's final, now we write the metadata (which has the *updated* margin).
+        # Write comments and header if it's a new file part and headers haven't been written for it
+        if not self._csv_header_comments_written_for_current_file and self._fieldnames:
+            if self.csv_file: # Should always be true if _open_new_csv_part was called
+                self.csv_file.write("# CSV Column Descriptions (for full details, see the accompanying _column_descriptions.txt file):\n")
+                for fieldname in self._fieldnames:
+                    description = get_column_description(fieldname)
+                    brief_desc = description.split('.')[0] + "." if '.' in description else description
+                    self.csv_file.write(f"# {fieldname}: {brief_desc}\n")
+                self.csv_file.write("\n") # Blank line after comments
+                
+                if not self.writer and self._fieldnames: # Ensure writer is created if it wasn't (e.g. first batch was empty)
+                    self.writer = csv.DictWriter(self.csv_file, fieldnames=self._fieldnames, lineterminator='\n')
+                
+                if self.writer:
+                    self.writer.writeheader()
+                self._csv_header_comments_written_for_current_file = True
+
+        # Write actual data
+        if self.writer and processed_results:
+            try:
+                self.writer.writerows(processed_results)
+                self.total_rows_written_for_current_file += len(processed_results)
+                if self.csv_file:
+                    self.csv_file.flush() # Ensure data is written to disk
+            except Exception as e:
+                self.logger.error(f"Error writing CSV rows: {e}", exc_info=True)
+                # Decide if we should re-raise or handle
+        
         if is_final:
-            self.write_metadata()
+            if self.csv_file:
+                self.csv_file.close()
+                self.csv_file = None
+                self.writer = None
+            self.write_metadata() # Write metadata at the very end
 
-        return output_file
+        return current_output_file_path if processed_results or is_final else None
+
+    def cleanup(self):
+        """Perform any necessary cleanup"""
+        if self.csv_file:
+            self.csv_file.close()
+            self.csv_file = None
+        self.writer = None
+        self.logger.info("CSVOutputHandler cleaned up.")
 
 
 class ParquetOutputHandler(OutputHandler):
@@ -291,13 +378,16 @@ class SQLiteOutputHandler(OutputHandler):
     def __init__(self, output_path: str, settings: 'AnalysisSettings'):
         super().__init__(output_path, settings)
         self.output_path = f"{os.path.splitext(output_path)[0]}.db"
-        self.batch_size = 1000
+        self.batch_size = 1000 # Batch size for SQLite inserts
         self.row_count = 0
-        self.connection_lock = Lock()
-        self.setup_database()
+        self.conn = self._get_connection() # Persistent connection for the lifetime of the handler
+        self.connection_lock = Lock() # To ensure thread-safe operations on self.conn
+        self._metadata_table_created = False
+        self.setup_database() # Initial schema setup
+        self._create_and_populate_column_descriptions_table() # Create/populate descriptions table
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Create a new database connection with appropriate settings"""
+        """Create or return a database connection with appropriate settings"""
         conn = sqlite3.connect(self.output_path, timeout=60)
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")
@@ -308,9 +398,9 @@ class SQLiteOutputHandler(OutputHandler):
         return conn
 
     def setup_database(self):
-        """Initialize database schema"""
+        """Initialize database schema, excluding column descriptions table which is handled separately."""
         try:
-            with self._get_connection() as conn:
+            with self.connection_lock, self.conn as conn: # Use the persistent connection
                 # Main results table
                 conn.execute('''
                     CREATE TABLE IF NOT EXISTS analysis_results (
@@ -373,15 +463,46 @@ class SQLiteOutputHandler(OutputHandler):
                 conn.execute('CREATE INDEX IF NOT EXISTS idx_details_result ON analysis_details(result_id)')
 
                 # Store initial metadata
-                self._store_metadata(conn)
+                self._store_metadata(conn) # Store other metadata
 
         except sqlite3.Error as e:
-            raise IOError(f"Failed to initialize SQLite database: {str(e)}")
+            self.logger.error(f"Failed to initialize SQLite database schema: {e}", exc_info=True)
+            raise IOError(f"Failed to initialize SQLite database schema: {str(e)}")
+
+    def _create_and_populate_column_descriptions_table(self):
+        if self._metadata_table_created:
+            return
+
+        descriptions_table_name = "output_column_descriptions"
+        try:
+            with self.connection_lock, self.conn as conn: # Use the persistent connection
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    CREATE TABLE IF NOT EXISTS {descriptions_table_name} (
+                        column_name TEXT PRIMARY KEY,
+                        description TEXT
+                    )
+                ''')
+                
+                for col_name, desc in COLUMN_DESCRIPTIONS.items():
+                    cursor.execute(f'''
+                        INSERT OR IGNORE INTO {descriptions_table_name} (column_name, description)
+                        VALUES (?, ?)
+                    ''', (col_name, desc))
+                
+                conn.commit()
+            self._metadata_table_created = True
+            self.logger.info(f"Ensured '{descriptions_table_name}' table exists and is populated.")
+        except sqlite3.Error as e:
+            self.logger.error(f"Error creating/populating metadata table '{descriptions_table_name}': {e}", exc_info=True)
+
 
     def _store_metadata(self, conn: sqlite3.Connection):
-        """Store analysis metadata with versioning"""
+        """Store analysis metadata with versioning (excluding column descriptions)"""
         metadata = self.get_metadata_dict()
-        metadata['total_records'] = self.row_count
+        # self.row_count might not be final here if called before all batches are written
+        # Consider moving total_records update to when is_final is true in write_batch
+        metadata['total_records'] = self.row_count 
         metadata['completed_at'] = datetime.now().isoformat()
 
         conn.executemany(
@@ -397,11 +518,10 @@ class SQLiteOutputHandler(OutputHandler):
             return None
 
         try:
-            with self.connection_lock:  # Ensure thread-safe database access
-                with self._get_connection() as conn:
-                    batch_start_time = datetime.now()
-                    success_count = 0
-                    error_count = 0
+            with self.connection_lock, self.conn as conn: # Use the persistent connection
+                batch_start_time = datetime.now()
+                success_count = 0
+                error_count = 0
 
                     # Create batch record
                     cursor = conn.execute('''
@@ -517,8 +637,15 @@ class SQLiteOutputHandler(OutputHandler):
 
     def cleanup(self):
         """Clean up resources"""
-        # No need to clean up connections as they're created and closed per operation
-        pass
+        if self.conn:
+            try:
+                with self.connection_lock:
+                    self.conn.close()
+                self.logger.info("SQLite connection closed.")
+            except sqlite3.Error as e:
+                self.logger.error(f"Error closing SQLite connection: {e}", exc_info=True)
+            finally:
+                self.conn = None
 
 
 def create_output_handler(output_format: str, output_path: str, settings: 'AnalysisSettings') -> OutputHandler:
