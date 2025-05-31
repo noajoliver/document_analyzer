@@ -602,12 +602,10 @@ class SQLiteOutputHandler(OutputHandler):
             batch_start_time = datetime.now()
             success_count = 0
             error_count = 0
-
-                    # Create batch record
             cursor = conn.cursor()
 
             # Create batch record in processing_stats
-            # self.logger.debug(f"Inserting into processing_stats: start_time={batch_start_time}, records_processed={len(batch_data)}")
+            self.logger.debug(f"Inserting into processing_stats: start_time={batch_start_time.isoformat()}, records_processed={len(batch_data)}")
             cursor.execute('''
                 INSERT INTO processing_stats (start_time, records_processed)
                 VALUES (?, ?)
@@ -619,12 +617,22 @@ class SQLiteOutputHandler(OutputHandler):
                 try:
                     rel_path = ""
                     try:
-                        rel_path = os.path.relpath(
-                            os.path.abspath(row_dict.get("File", "")),
-                            os.path.dirname(self.output_path)
-                        )
+                        # Ensure row_dict.get("File") returns a string, default to empty string if None
+                        file_for_relpath = row_dict.get("File", "")
+                        if not isinstance(file_for_relpath, str): file_for_relpath = str(file_for_relpath)
+
+                        if file_for_relpath: # Only call abspath if there's a path
+                             abs_file_path = os.path.abspath(file_for_relpath)
+                             rel_path = os.path.relpath(abs_file_path, os.path.dirname(self.output_path))
+                        else:
+                             rel_path = "" # Or handle as an error/default
                     except ValueError: # Handles cases like different drives on Windows
-                        rel_path = os.path.abspath(row_dict.get("File", ""))
+                        file_for_relpath = row_dict.get("File", "")
+                        if not isinstance(file_for_relpath, str): file_for_relpath = str(file_for_relpath)
+                        if file_for_relpath:
+                            rel_path = os.path.abspath(file_for_relpath)
+                        else:
+                            rel_path = ""
 
                     file_size = 0
                     file_path_for_size = row_dict.get("File")
@@ -647,7 +655,7 @@ class SQLiteOutputHandler(OutputHandler):
                         file_size,
                         batch_id
                     )
-                    # self.logger.debug(f"Inserting into analysis_results: {analysis_results_data}")
+                    self.logger.debug(f"Inserting into analysis_results: {analysis_results_data}")
                     cursor.execute('''
                         INSERT INTO analysis_results
                         (file_path, page_number, content_status, text_status,
@@ -661,23 +669,32 @@ class SQLiteOutputHandler(OutputHandler):
                     analysis_details_dict = row_dict.get("Analysis Details")
                     if isinstance(analysis_details_dict, dict):
                         details_to_insert = []
-                        for category, cat_details in analysis_details_dict.items():
+                        for category, cat_details in analysis_details_dict.items(): # e.g. category 'Text', 'Image', 'Margins Used'
                             if isinstance(cat_details, dict):
-                                for detail_key, detail_value in cat_details.items():
+                                for detail_key, detail_value in cat_details.items(): # e.g. detail_key 'Top Content', 'Bottom Margin (%)'
                                     numeric_val = None
                                     if isinstance(detail_value, str):
                                         try:
+                                            # Attempt to strip '%' and convert to float
                                             numeric_val = float(detail_value.rstrip('%'))
                                         except ValueError:
-                                            pass # Keep None if not convertible
+                                            # If stripping '%' and converting fails, it's not a percentage float
+                                            try: # Try converting directly
+                                                numeric_val = float(detail_value)
+                                            except ValueError:
+                                                pass # Keep None if not convertible
                                     elif isinstance(detail_value, (int, float)):
                                         numeric_val = float(detail_value)
 
                                     details_to_insert.append((
-                                        result_id, category, detail_key, str(detail_value), numeric_val
+                                        result_id,
+                                        category,       # E.g., "Text", "Image", "Margins Used"
+                                        detail_key,     # E.g., "Top Content", "Bottom Content", "Top Margin (%)"
+                                        str(detail_value), # Store original value as text
+                                        numeric_val     # Store converted numeric value, or None
                                     ))
                         if details_to_insert:
-                            # self.logger.debug(f"Inserting into analysis_details for result_id {result_id}: {details_to_insert}")
+                            self.logger.debug(f"Inserting into analysis_details for result_id {result_id}: {details_to_insert}")
                             cursor.executemany('''
                                 INSERT INTO analysis_details
                                 (result_id, category, detail_type, detail_value, numeric_value)
@@ -692,24 +709,21 @@ class SQLiteOutputHandler(OutputHandler):
                     self.logger.error(f"Error processing row for DB: {row_dict.get('File', 'Unknown File')}: {e}", exc_info=True)
 
             # Update batch statistics
-            conn.execute('''
+            cursor.execute('''
                 UPDATE processing_stats
                 SET end_time = ?, success_count = ?, error_count = ?
                 WHERE batch_id = ?
-            ''', (datetime.now(), success_count, error_count, batch_id))
+            ''', (datetime.now().isoformat(), success_count, error_count, batch_id))
 
             conn.commit() # Commit after each batch
             self.logger.debug(f"SQLite batch written. Success: {success_count}, Errors: {error_count}")
 
         except sqlite3.Error as e:
             self.logger.error(f"Error writing batch to SQLite: {e}", exc_info=True)
-            # Optionally rollback, though auto-commit might handle some cases or commit might fail
             try:
                 conn.rollback()
             except sqlite3.Error as re:
                  self.logger.error(f"Rollback failed: {re}", exc_info=True)
-        # Removed specific _create_final_indexes and _store_metadata calls from here,
-        # as they are part of schema init or should be handled as separate queued tasks if dynamic.
 
     def write_batch(self, batch: List[Dict[str, Any]], is_final: bool = False) -> Optional[str]:
         """Queue a batch of results for writing to SQLite database."""
