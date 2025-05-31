@@ -1936,7 +1936,7 @@ class DocumentAnalyzerGUI:
                         "Content Status": "Page 1 Processing Failed",
                         "Type": "PDF",
                         "Error": "Encryption Error: document closed or encrypted",
-                        "Error Severity": "WARNING"
+                        "Error Severity": "ERROR"
                     }]
 
                 total_pages = len(pdf)
