@@ -260,7 +260,8 @@ class CSVOutputHandler(OutputHandler):
         # Write comments and header if it's a new file part and headers haven't been written for it
         if not self._csv_header_comments_written_for_current_file and self._fieldnames:
             if self.csv_file: # Should always be true if _open_new_csv_part was called
-                self.csv_file.write("# CSV Column Descriptions (for full details, see the accompanying _column_descriptions.txt file):\n")
+                intro_comment_message = "# CSV Column Descriptions (for full details, see the accompanying _column_descriptions.txt file):\n"
+                self.csv_file.write(intro_comment_message.replace('\t', ' '))
                 for fieldname in self._fieldnames:
                     description = get_column_description(fieldname)
                     brief_desc = description.split('.')[0] + "." if '.' in description else description
