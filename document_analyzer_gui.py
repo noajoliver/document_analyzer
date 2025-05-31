@@ -219,8 +219,8 @@ class AnalysisSettings:
     include_images: bool = True
     process_subdirectories: bool = True
     minimal_output: bool = False
-    top_margin_percent: float = 5.0     # Default: top 5% of the page
-    bottom_margin_percent: float = 5.0  # Default: bottom 5% of the page
+    top_margin_percent: float = 4.5     # Default: top 4.5% of the page
+    bottom_margin_percent: float = 4.5  # Default: bottom 4.5% of the page
 
     def __post_init__(self):
         """Validate settings after initialization"""
@@ -361,7 +361,7 @@ class DocumentAnalyzerGUI:
     """Main GUI application for document margin analysis"""
 
     # Class constants
-    DEFAULT_THRESHOLD = 1.0
+    DEFAULT_THRESHOLD = 0.5
     DEFAULT_OUTPUT_FORMAT = 'csv'
     DEFAULT_MAX_ROWS = 80000
     DEFAULT_BATCH_SIZE = 1000
@@ -400,8 +400,8 @@ class DocumentAnalyzerGUI:
         self.random_n_size = tk.StringVar(value='100')  # Default to 100 files
         self.confidence_level = tk.StringVar(value='95')
         self.margin_of_error = tk.StringVar(value='5')
-        self.top_margin_percent = tk.DoubleVar(value=5.0)
-        self.bottom_margin_percent = tk.DoubleVar(value=5.0)
+        self.top_margin_percent = tk.DoubleVar(value=4.5)
+        self.bottom_margin_percent = tk.DoubleVar(value=4.5)
 
         # File type selection
         self.include_pdfs = tk.BooleanVar(value=True)
