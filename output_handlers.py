@@ -264,7 +264,8 @@ class CSVOutputHandler(OutputHandler):
                 for fieldname in self._fieldnames:
                     description = get_column_description(fieldname)
                     brief_desc = description.split('.')[0] + "." if '.' in description else description
-                    self.csv_file.write(f"# {fieldname}: {brief_desc}\n")
+                    sanitized_brief_desc = brief_desc.replace('\t', ' ')
+                    self.csv_file.write(f"# {fieldname}: {sanitized_brief_desc}\n")
                 self.csv_file.write("\n") # Blank line after comments
 
                 if not self.writer and self._fieldnames: # Ensure writer is created if it wasn't (e.g. first batch was empty)
