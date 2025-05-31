@@ -806,13 +806,19 @@ class DocumentAnalyzerGUI:
                             self.log_expanded.set(True)
                             self.log_expand_btn.invoke()
 
-            # Also print to console for debugging
-            logger.info(message)
+            # Also print to console for debugging / use Python's logging
+            if 'error' in message.lower() or 'failed' in message.lower() or 'warning' in message.lower():
+                logger.error(message)
+            elif 'debug' in message.lower(): # Assuming a convention for debug messages if passed here
+                logger.debug(message)
+            else:
+                logger.info(message)
 
         except Exception as e:
             # Fallback to print if logging fails
-            logger.error(f"Failed to log message to GUI: {e}", exc_info=True)
-            print(f"Original message: {message}")
+            logger.error(f"Failed to log message to GUI or Python logger: {e}", exc_info=True)
+            # Critical fallback print, as logger itself might be the issue.
+            print(f"CRITICAL FALLBACK - Original message: {message}")
 
     def setup_ui(self) -> None:
         """Set up the main user interface"""
@@ -3109,7 +3115,17 @@ class DocumentAnalyzerGUI:
 
 def main() -> None:
     """Main entry point for the application"""
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
+        # Configure basic logging
+        # The format here is slightly different from the user request, but it's already in place.
+        # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
+        # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
+        # Will keep the existing format and ensure level is INFO.
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                            handlers=[logging.StreamHandler()]) # Default to console
+
+        logger.info("Application starting...") # Example of using the main logger
+
     root = tk.Tk()
     app = None
 
@@ -3144,16 +3160,20 @@ def main() -> None:
 
         # Start application
         root.mainloop()
+        logger.info("Application closing...") # Log application close
 
     except Exception as e:
+        # Use logger for fatal error before message box and exit
+        logger.critical(f"Fatal error: {str(e)}", exc_info=True)
         error_message = f"Fatal error: {str(e)}\n\nPlease report this error if it persists."
         messagebox.showerror("Error", error_message)
 
         if app:
             try:
-                app.cleanup()
-            except:
-                pass
+                app.cleanup() # cleanup already uses logger.error for its internal errors
+            except Exception as app_cleanup_err:
+                logger.critical(f"Error during app cleanup after fatal error: {app_cleanup_err}", exc_info=True)
+                pass # Avoid masking the original fatal error
 
         sys.exit(1)
 

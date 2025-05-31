@@ -260,18 +260,21 @@ class CSVOutputHandler(OutputHandler):
         # Write comments and header if it's a new file part and headers haven't been written for it
         if not self._csv_header_comments_written_for_current_file and self._fieldnames:
             if self.csv_file: # Should always be true if _open_new_csv_part was called
-                intro_text = "CSV Column Descriptions (for full details, see the accompanying _column_descriptions.txt file):"
-                sanitized_intro_text = intro_text.replace('\t', ' ')
-                escaped_intro_text = sanitized_intro_text.replace('"', '""')
-                self.csv_file.write(f'# "{escaped_intro_text}"\n')
+                intro_comment_content = "# CSV Column Descriptions (for full details, see the accompanying _column_descriptions.txt file):"
+                sanitized_content = intro_comment_content.replace('\t', ' ')
+                escaped_content = sanitized_content.replace('"', '""')
+                quoted_line = f'"{escaped_content}"'
+                self.csv_file.write(f"{quoted_line}\n")
 
                 for fieldname in self._fieldnames:
                     description = get_column_description(fieldname)
+                    # 'brief_desc' should already be just the summary part of the description.
                     brief_desc = description.split('.')[0] + "." if '.' in description else description
-                    sanitized_brief_desc = brief_desc.replace('\t', ' ')
-                    escaped_brief_desc = sanitized_brief_desc.replace('"', '""') # Escape existing double quotes
-                    quoted_desc = f'"{escaped_brief_desc}"' # Add surrounding quotes
-                    self.csv_file.write(f"# {fieldname}: {quoted_desc}\n")
+                    full_column_comment_content = f"# {fieldname}: {brief_desc}"
+                    sanitized_content = full_column_comment_content.replace('\t', ' ')
+                    escaped_content = sanitized_content.replace('"', '""')
+                    quoted_line = f'"{escaped_content}"'
+                    self.csv_file.write(f"{quoted_line}\n")
                 self.csv_file.write("\n") # Blank line after comments
 
                 if not self.writer and self._fieldnames: # Ensure writer is created if it wasn't (e.g. first batch was empty)

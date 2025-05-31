@@ -113,7 +113,7 @@ class ContentAnalyzer:
                                   found in the top/bottom margin areas.
         """
         # 1) Print current detection threshold for debugging
-        logger.debug(f"\nAnalyzing with threshold: {self.threshold}%")
+        logger.debug(f"Analyzing with threshold: {self.threshold}%")
 
         # 2) Convert image to grayscale for content detection
         gray_image = image.convert('L')
@@ -299,14 +299,14 @@ class PageAnalyzer:
             settings: Analysis settings including threshold
         """
         # Add debug print to verify the threshold
-        logger.info(f"Initializing PageAnalyzer with threshold: {settings.threshold}%")
+        logger.info(f"Initializing PageAnalyzer with threshold: {settings.threshold}%") # This one is already correct
         self.content_analyzer = ContentAnalyzer(threshold=settings.threshold)
         self.settings = settings
         self.top_margin_percent = settings.top_margin_percent
         self.bottom_margin_percent = settings.bottom_margin_percent
 
         # Verify the threshold was set correctly
-        logger.info(f"ContentAnalyzer threshold set to: {self.content_analyzer.threshold}%")
+        logger.info(f"ContentAnalyzer threshold set to: {self.content_analyzer.threshold}%") # This one is also already correct
 
     def analyze_pdf_page(self, page: fitz.Page, file_name: str, page_num: int) -> Dict[str, Any]:
         """
