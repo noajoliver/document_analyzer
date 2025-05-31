@@ -269,7 +269,7 @@ class CSVOutputHandler(OutputHandler):
                 for fieldname in self._fieldnames:
                     description = get_column_description(fieldname)
                     # 'brief_desc' should already be just the summary part of the description.
-                    brief_desc = description.split('.')[0] + "." if '.' in description else description
+                    brief_desc = description # Use the full description
                     full_column_comment_content = f"# {fieldname}: {brief_desc}"
                     sanitized_content = full_column_comment_content.replace('\t', ' ')
                     escaped_content = sanitized_content.replace('"', '""')
