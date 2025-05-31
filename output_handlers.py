@@ -603,86 +603,92 @@ class SQLiteOutputHandler(OutputHandler):
             error_count = 0
 
                     # Create batch record
+            cursor = conn.cursor()
+
             # Create batch record in processing_stats
-            cursor = conn.cursor() # Obtain a cursor from the connection
+            # self.logger.debug(f"Inserting into processing_stats: start_time={batch_start_time}, records_processed={len(batch_data)}")
             cursor.execute('''
-            INSERT INTO processing_stats (start_time, records_processed)
-            VALUES (?, ?)
-            ''', (batch_start_time, len(batch_data)))
+                INSERT INTO processing_stats (start_time, records_processed)
+                VALUES (?, ?)
+            ''', (batch_start_time.isoformat(), len(batch_data)))
             batch_id = cursor.lastrowid
 
             # Process each result
-            for result in batch_data:
+            for row_dict in batch_data:
                 try:
-                    rel_path = os.path.relpath(
-                        os.path.abspath(result['File']),
-                        os.path.dirname(self.output_path)
-                    )
-                except ValueError:
-                    rel_path = os.path.abspath(result['File'])
-
-                file_size = 0
-                if os.path.exists(result['File']): # Check existence before getting size
+                    rel_path = ""
                     try:
-                        file_size = os.path.getsize(result['File'])
-                    except OSError: # Handle potential race condition if file is deleted after check
-                        self.logger.warning(f"Could not get size for file (it may have been deleted): {result['File']}")
-                        pass # Keep file_size as 0
+                        rel_path = os.path.relpath(
+                            os.path.abspath(row_dict.get("File", "")),
+                            os.path.dirname(self.output_path)
+                        )
+                    except ValueError: # Handles cases like different drives on Windows
+                        rel_path = os.path.abspath(row_dict.get("File", ""))
 
+                    file_size = 0
+                    file_path_for_size = row_dict.get("File")
+                    if file_path_for_size and os.path.exists(file_path_for_size):
+                        try:
+                            file_size = os.path.getsize(file_path_for_size)
+                        except OSError as e:
+                            self.logger.warning(f"Could not get size for file {file_path_for_size}: {e}")
 
-                # Insert main result
-                cursor.execute('''
-                INSERT INTO analysis_results
-                (file_path, page_number, content_status, text_status,
-                 image_status, file_type, error_message, error_severity,
-                 relative_path, file_size, batch_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    result['File'],
-                    result.get('Page', 1),
-                    result['Content Status'],
-                    result.get('Text Status', ''),
-                    result.get('Image Status', ''),
-                    result.get('Type', 'Unknown'),
-                    result.get('Error'),
-                    result.get('Error Severity'),
-                    rel_path,
-                    file_size,
-                    batch_id
-                ))
-                result_id = cursor.lastrowid
+                    analysis_results_data = (
+                        row_dict.get("File"),
+                        row_dict.get("Page"),
+                        row_dict.get("Content Status"),
+                        row_dict.get("Text Status"),
+                        row_dict.get("Image Status"),
+                        row_dict.get("Type"),
+                        row_dict.get("Error"),
+                        row_dict.get("Error Severity"),
+                        rel_path,
+                        file_size,
+                        batch_id
+                    )
+                    # self.logger.debug(f"Inserting into analysis_results: {analysis_results_data}")
+                    cursor.execute('''
+                        INSERT INTO analysis_results
+                        (file_path, page_number, content_status, text_status,
+                         image_status, file_type, error_message, error_severity,
+                         relative_path, file_size, batch_id)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', analysis_results_data)
+                    result_id = cursor.lastrowid
 
-                # Process analysis details
-                if 'Analysis Details' in result and isinstance(result['Analysis Details'], dict):
-                    details_to_insert = []
-                    for category, values in result['Analysis Details'].items():
-                        if isinstance(values, dict):
-                            for key, value_item in values.items():
-                                try:
-                                    numeric_value = float(str(value_item).replace('%', ''))
-                                except (ValueError, TypeError):
-                                    numeric_value = None
-                                details_to_insert.append((result_id, category, key, str(value_item), numeric_value))
-                        else:
-                            try:
-                                numeric_value = float(str(values).replace('%', ''))
-                            except (ValueError, TypeError):
-                                numeric_value = None
-                            details_to_insert.append((result_id, category, 'value', str(values), numeric_value))
+                    # Process analysis details
+                    analysis_details_dict = row_dict.get("Analysis Details")
+                    if isinstance(analysis_details_dict, dict):
+                        details_to_insert = []
+                        for category, cat_details in analysis_details_dict.items():
+                            if isinstance(cat_details, dict):
+                                for detail_key, detail_value in cat_details.items():
+                                    numeric_val = None
+                                    if isinstance(detail_value, str):
+                                        try:
+                                            numeric_val = float(detail_value.rstrip('%'))
+                                        except ValueError:
+                                            pass # Keep None if not convertible
+                                    elif isinstance(detail_value, (int, float)):
+                                        numeric_val = float(detail_value)
 
-                    if details_to_insert:
-                        conn.executemany('''
-                        INSERT INTO analysis_details
-                        (result_id, category, detail_type, detail_value, numeric_value)
-                        VALUES (?, ?, ?, ?, ?)
-                        ''', details_to_insert)
+                                    details_to_insert.append((
+                                        result_id, category, detail_key, str(detail_value), numeric_val
+                                    ))
+                        if details_to_insert:
+                            # self.logger.debug(f"Inserting into analysis_details for result_id {result_id}: {details_to_insert}")
+                            cursor.executemany('''
+                                INSERT INTO analysis_details
+                                (result_id, category, detail_type, detail_value, numeric_value)
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', details_to_insert)
 
-                success_count += 1
-                self.row_count += 1
+                    success_count += 1
+                    self.row_count += 1
 
-            except Exception as e: # Catch errors per row
-                error_count += 1
-                self.logger.error(f"Error processing result for DB: {result.get('File', 'Unknown File')}: {e}", exc_info=True)
+                except Exception as e: # Catch errors per row
+                    error_count += 1
+                    self.logger.error(f"Error processing row for DB: {row_dict.get('File', 'Unknown File')}: {e}", exc_info=True)
 
             # Update batch statistics
             conn.execute('''
