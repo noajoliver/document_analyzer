@@ -139,7 +139,7 @@ class ProcessingStats:
             logger.error(f"Error calculating elapsed time: {e}", exc_info=True)
             return "00:00:00"
 
-    def get_estimated_time_remaining(self, total_files: int) -> str:
+    def get_estimated_time_remaining(self) -> str:
         """
         Calculate and format estimated time remaining
 
@@ -1800,7 +1800,7 @@ class DocumentAnalyzerGUI:
             self.include_images.get(),
             self.SUPPORTED_FORMATS,
             options=self.processing_options,
-            progress_callback=lambda msg: self.log_message(msg)
+            progress_callback=lambda msg: logger.debug(msg)
         )
 
         total_files = len(files)
@@ -2181,7 +2181,6 @@ class DocumentAnalyzerGUI:
                 self.SUPPORTED_FORMATS,
                 options=self.processing_options,
                 progress_callback=lambda msg: logger.debug(msg) if trigger != "checkbox" else None
-            progress_callback=lambda msg: logger.debug(msg)
             )
 
             total_files = len(files)
