@@ -7,9 +7,9 @@ An application for analyzing PDF documents and images for content in header and 
   * Default 1.0% threshold for standard detection
   * Fine control with 0.1% increments
   * Recommended settings:
-    - 1.0%: Standard analysis (default)
-    - 0.1-0.5%: High sensitivity
-    - 1.1-2.0%: Moderate tolerance
+    - 0.5%: Standard analysis (default)
+    - 0.1-0.4%: High sensitivity
+    - 0.6-2.0%: Moderate tolerance
     - 2.1-5.0%: Lower sensitivity
     - 5.1-10.0%: Minimal sensitivity
 
