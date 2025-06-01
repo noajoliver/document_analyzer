@@ -415,6 +415,7 @@ class DocumentAnalyzerGUI:
         self.margin_of_error = tk.StringVar(value='5')
         self.top_margin_percent = tk.DoubleVar(value=4.5)
         self.bottom_margin_percent = tk.DoubleVar(value=4.5)
+        self.minimal_output = tk.BooleanVar(value=False)
 
         # File type selection
         self.include_pdfs = tk.BooleanVar(value=True)
@@ -532,6 +533,7 @@ class DocumentAnalyzerGUI:
                 margin_of_error=margin,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
+                minimal_output=self.minimal_output.get(),
                 top_margin_percent=self.top_margin_percent.get(),  # new
                 bottom_margin_percent=self.bottom_margin_percent.get()  # new
             )
@@ -1495,15 +1497,15 @@ class DocumentAnalyzerGUI:
         format_combo.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
 
         # Add Minimal Output checkbox
-        self.minimal_output = tk.BooleanVar(value=False)
         minimal_frame = ttk.Frame(output_frame)
         minimal_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=2)
 
-        ttk.Checkbutton(
+        self.minimal_checkbox = ttk.Checkbutton(
             minimal_frame,
-            text="Minimal Output (File, Page, Content Status only)",
+            text="Minimal Output (File, Page, Type, Content Status only)",
             variable=self.minimal_output
-        ).grid(row=0, column=0, sticky=tk.W, padx=5)
+        )
+        self.minimal_checkbox.grid(row=0, column=0, sticky=tk.W, padx=5)
 
         # CSV-specific options frame
         self.csv_options = ttk.Frame(output_frame)
@@ -1521,6 +1523,9 @@ class DocumentAnalyzerGUI:
 
         # Bind format change handler
         self.output_format.trace('w', self.on_format_change)
+        
+        # Initialize format-specific UI state
+        self.on_format_change()
 
         # Configure grid weights
         output_frame.columnconfigure(1, weight=1)
@@ -1763,6 +1768,7 @@ class DocumentAnalyzerGUI:
                     return {
                         'File': result['File'],
                         'Page': result.get('Page', 1),
+                        'Type': result.get('Type', 'Unknown'),
                         'Content Status': result['Content Status']
                     }
                 return result
@@ -1952,7 +1958,10 @@ class DocumentAnalyzerGUI:
             self.queue.put(("progress", (i / len(pdf_files)) * 100))
 
             try:
-                self.process_pdf(file_path)
+                results = self.process_pdf(file_path)
+                if results:
+                    for result in results:
+                        self.add_result(result)
             except MemoryError as e:
                 self.handle_processing_error(e, file_path)
                 break  # Stop processing on memory errors
@@ -2108,6 +2117,9 @@ class DocumentAnalyzerGUI:
     def add_result(self, result: Dict[str, Any]):
         """Add a result and write batch if needed"""
         if result:
+            # Debug: Check if Type field is present
+            if 'Type' not in result:
+                self.log_message(f"WARNING: Type field missing from result for {result.get('File', 'Unknown')}")
             with self.results_lock:
                 self.results_batch.append(result)
 
@@ -2558,6 +2570,7 @@ class DocumentAnalyzerGUI:
                 margin_of_error=float(self.margin_of_error.get()) / 100,
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
+                minimal_output=self.minimal_output.get(),
                 total_files=total_files,
                 top_margin_percent=self.top_margin_percent.get(),
                 bottom_margin_percent=self.bottom_margin_percent.get()
@@ -2977,10 +2990,21 @@ class DocumentAnalyzerGUI:
     def on_format_change(self, *args) -> None:
         """Handle output format changes"""
         try:
-            if self.output_format.get() == 'csv':
+            format_value = self.output_format.get()
+            
+            # Show/hide CSV options
+            if format_value == 'csv':
                 self.csv_options.grid()
             else:
                 self.csv_options.grid_remove()
+            
+            # Disable minimal output for SQLite
+            if format_value == 'sqlite':
+                self.minimal_output.set(False)
+                self.minimal_checkbox.configure(state='disabled')
+            else:
+                # Re-enable the minimal output checkbox for other formats
+                self.minimal_checkbox.configure(state='normal')
 
             # Update file extension in save location
             if self.save_entry.get():
@@ -2990,7 +3014,7 @@ class DocumentAnalyzerGUI:
                     'csv': '.csv',
                     'parquet': '.parquet',
                     'sqlite': '.db'
-                }.get(self.output_format.get(), '.csv')
+                }.get(format_value, '.csv')
                 self.save_entry.delete(0, tk.END)
                 self.save_entry.insert(0, base_path + new_ext)
         except Exception as e:

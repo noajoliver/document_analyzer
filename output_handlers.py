@@ -16,9 +16,6 @@ along with this program.  If not, see https://www.gnu.org/licenses/.
 import csv
 import json
 import os
-import csv
-import json
-import os
 import sqlite3
 import logging
 import queue
@@ -133,7 +130,11 @@ class CSVOutputHandler(OutputHandler):
         super().__init__(output_path, settings)
         self.current_file_number = 1
         self.total_rows_written_for_current_file = 0 # Renamed for clarity
-        self._fieldnames = ORDERED_COLUMN_NAMES # Use predefined order
+        # Set fieldnames based on minimal output setting
+        if settings.minimal_output:
+            self._fieldnames = ["File", "Page", "Type", "Content Status"]
+        else:
+            self._fieldnames = ORDERED_COLUMN_NAMES # Use predefined order
         self.csv_file = None
         self.writer = None
         self._csv_header_comments_written_for_current_file = False
@@ -219,9 +220,13 @@ class CSVOutputHandler(OutputHandler):
         for result in batch:
             if self.settings.minimal_output:
                 # For minimal output, only include specified fields
+                # Debug: Log what we're getting
+                if 'Type' not in result:
+                    self.logger.warning(f"Type field missing from result: {result.keys()}")
                 processed_result = {
                     'File': os.path.abspath(result['File']),
                     'Page': result.get('Page', 1),
+                    'Type': result.get('Type', 'Unknown'),
                     'Content Status': result['Content Status']
                 }
             else:
@@ -287,9 +292,13 @@ class CSVOutputHandler(OutputHandler):
         # Write actual data
         if self.writer and processed_results:
             try:
-                # Flatten results before writing
-                flattened_results = [self._flatten_row_for_csv(row) for row in processed_results]
-                self.writer.writerows(flattened_results)
+                # For minimal output, write processed results directly (no flattening needed)
+                # For full output, flatten results before writing
+                if self.settings.minimal_output:
+                    self.writer.writerows(processed_results)
+                else:
+                    flattened_results = [self._flatten_row_for_csv(row) for row in processed_results]
+                    self.writer.writerows(flattened_results)
                 self.total_rows_written_for_current_file += len(processed_results)
                 if self.csv_file:
                     self.csv_file.flush() # Ensure data is written to disk
@@ -329,6 +338,16 @@ class ParquetOutputHandler(OutputHandler):
 
     def _flatten_record(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Flatten nested dictionary structures and handle special fields"""
+        # For minimal output, return only the minimal fields
+        if self.settings.minimal_output:
+            return {
+                'File': record.get('File', ''),
+                'Page': record.get('Page', 1),
+                'Type': record.get('Type', 'Unknown'),
+                'Content Status': record.get('Content Status', '')
+            }
+        
+        # For full output, flatten as before
         flattened = {}
 
         for key, value in record.items():
@@ -361,8 +380,22 @@ class ParquetOutputHandler(OutputHandler):
             return None
 
         try:
-            # Flatten the batch data
-            flattened_batch = self._flatten_batch(batch)
+            # Process batch based on minimal output setting
+            if self.settings.minimal_output:
+                # For minimal output, only keep specified fields
+                minimal_batch = []
+                for record in batch:
+                    minimal_record = {
+                        'File': os.path.abspath(record.get('File', '')),
+                        'Page': record.get('Page', 1),
+                        'Type': record.get('Type', 'Unknown'),
+                        'Content Status': record.get('Content Status', '')
+                    }
+                    minimal_batch.append(minimal_record)
+                flattened_batch = minimal_batch
+            else:
+                # For full output, flatten the batch data
+                flattened_batch = self._flatten_batch(batch)
 
             # Convert to DataFrame
             df = pd.DataFrame(flattened_batch)
@@ -674,41 +707,42 @@ class SQLiteOutputHandler(OutputHandler):
                     ''', analysis_results_data)
                     result_id = cursor.lastrowid
 
-                    # Process analysis details
-                    analysis_details_dict = row_dict.get("Analysis Details")
-                    if isinstance(analysis_details_dict, dict):
-                        details_to_insert = []
-                        for category, cat_details in analysis_details_dict.items(): # e.g. category 'Text', 'Image', 'Margins Used'
-                            if isinstance(cat_details, dict):
-                                for detail_key, detail_value in cat_details.items(): # e.g. detail_key 'Top Content', 'Bottom Margin (%)'
-                                    numeric_val = None
-                                    if isinstance(detail_value, str):
-                                        try:
-                                            # Attempt to strip '%' and convert to float
-                                            numeric_val = float(detail_value.rstrip('%'))
-                                        except ValueError:
-                                            # If stripping '%' and converting fails, it's not a percentage float
-                                            try: # Try converting directly
-                                                numeric_val = float(detail_value)
+                    # Process analysis details (skip if minimal output)
+                    if not self.settings.minimal_output:
+                        analysis_details_dict = row_dict.get("Analysis Details")
+                        if isinstance(analysis_details_dict, dict):
+                            details_to_insert = []
+                            for category, cat_details in analysis_details_dict.items(): # e.g. category 'Text', 'Image', 'Margins Used'
+                                if isinstance(cat_details, dict):
+                                    for detail_key, detail_value in cat_details.items(): # e.g. detail_key 'Top Content', 'Bottom Margin (%)'
+                                        numeric_val = None
+                                        if isinstance(detail_value, str):
+                                            try:
+                                                # Attempt to strip '%' and convert to float
+                                                numeric_val = float(detail_value.rstrip('%'))
                                             except ValueError:
-                                                pass # Keep None if not convertible
-                                    elif isinstance(detail_value, (int, float)):
-                                        numeric_val = float(detail_value)
+                                                # If stripping '%' and converting fails, it's not a percentage float
+                                                try: # Try converting directly
+                                                    numeric_val = float(detail_value)
+                                                except ValueError:
+                                                    pass # Keep None if not convertible
+                                        elif isinstance(detail_value, (int, float)):
+                                            numeric_val = float(detail_value)
 
-                                    details_to_insert.append((
-                                        result_id,
-                                        category,       # E.g., "Text", "Image", "Margins Used"
-                                        detail_key,     # E.g., "Top Content", "Bottom Content", "Top Margin (%)"
-                                        str(detail_value), # Store original value as text
-                                        numeric_val     # Store converted numeric value, or None
-                                    ))
-                        if details_to_insert:
-                            self.logger.debug(f"Inserting into analysis_details for result_id {result_id}: {details_to_insert}")
-                            cursor.executemany('''
-                                INSERT INTO analysis_details
-                                (result_id, category, detail_type, detail_value, numeric_value)
-                                VALUES (?, ?, ?, ?, ?)
-                            ''', details_to_insert)
+                                        details_to_insert.append((
+                                            result_id,
+                                            category,       # E.g., "Text", "Image", "Margins Used"
+                                            detail_key,     # E.g., "Top Content", "Bottom Content", "Top Margin (%)"
+                                            str(detail_value), # Store original value as text
+                                            numeric_val     # Store converted numeric value, or None
+                                        ))
+                            if details_to_insert:
+                                self.logger.debug(f"Inserting into analysis_details for result_id {result_id}: {details_to_insert}")
+                                cursor.executemany('''
+                                    INSERT INTO analysis_details
+                                    (result_id, category, detail_type, detail_value, numeric_value)
+                                    VALUES (?, ?, ?, ?, ?)
+                                ''', details_to_insert)
 
                     success_count += 1
                     self.row_count += 1
