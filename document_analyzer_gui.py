@@ -3115,16 +3115,16 @@ class DocumentAnalyzerGUI:
 
 def main() -> None:
     """Main entry point for the application"""
-        # Configure basic logging
-        # The format here is slightly different from the user request, but it's already in place.
-        # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
-        # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
-        # Will keep the existing format and ensure level is INFO.
-        logging.basicConfig(level=logging.INFO,
-                            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-                            handlers=[logging.StreamHandler()]) # Default to console
+    # Configure basic logging
+    # The format here is slightly different from the user request, but it's already in place.
+    # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
+    # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
+    # Will keep the existing format and ensure level is INFO.
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                        handlers=[logging.StreamHandler()]) # Default to console
 
-        logger.info("Application starting...") # Example of using the main logger
+    logger.info("Application starting...") # Example of using the main logger
 
     root = tk.Tk()
     app = None

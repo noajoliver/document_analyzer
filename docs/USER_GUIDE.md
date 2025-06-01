@@ -4,7 +4,7 @@
 ## Table of Contents
 1. [Getting Started](#getting-started)
 2. [Interface Overview](#interface-overview)
-3. [Configuration Options](#configuration-options)
+3. [Configuration Options](#analysis-configuration)
 4. [Analysis Process](#analysis-process)
 5. [Troubleshooting](#troubleshooting)
 
@@ -38,9 +38,9 @@
 #### Detection Threshold
 ![Threshold Configuration](images/threshold-config.png)
 
-- 0.1-0.5%: Extremely sensitive, flags minimal content
-- 1.0%: Standard detection level (recommended)
-- 1.1-2.0%: Moderate tolerance
+- 0.1-0.4%: Extremely sensitive, flags minimal content
+- 0.5%: Standard detection level (recommended)
+- 0.6-2.0%: Moderate tolerance
 - 2.1-5.0%: Ignores minor marks
 - 5.1-10.0%: Only flags substantial content
 
