@@ -9,9 +9,10 @@ pyarrow==14.0.1
 # Build dependencies
 pyinstaller==6.3.0
 requests==2.32.0
-setuptools>=70.0.0
+setuptools>=78.1.1
 wheel>=0.38.0
 markdown>=3.0
 
 # Additional dependencies for PDF processing
 pdf2image==1.16.3
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
