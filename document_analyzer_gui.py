@@ -1309,12 +1309,12 @@ class DocumentAnalyzerGUI:
         threshold_help = self.create_help_button(
             threshold_frame,
             "Adjust the sensitivity of margin content detection:\n\n"
-            "• 0.1-0.5%: Extremely sensitive, flags minimal content\n"
-            "• 1.0%: Default - standard detection level\n"
-            "• 1.1-2.0%: Moderate tolerance\n"
+            "• 0.1-0.4%: Extremely sensitive, flags minimal content\n"
+            "• 0.5%: Default - standard detection level\n"
+            "• 0.6-2.0%: Moderate tolerance\n"
             "• 2.1-5.0%: More tolerant, ignores minor marks\n"
             "• 5.1-10.0%: Very tolerant, only flags substantial content\n\n"
-            "Recommended: Use 1.0% for standard document analysis."
+            "Recommended: Use 0.5% for standard document analysis."
         )
         threshold_help.grid(row=0, column=2, padx=5)
 
