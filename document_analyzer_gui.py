@@ -911,7 +911,7 @@ class DocumentAnalyzerGUI:
         """Configure initial window size and position"""
         # Calculate dimensions
         initial_width = 700
-        initial_height = 720
+        initial_height = 750
         status_bar_height = 25  # Height allocated for status bar
 
         # Adjust total height
@@ -1309,12 +1309,12 @@ class DocumentAnalyzerGUI:
         threshold_help = self.create_help_button(
             threshold_frame,
             "Adjust the sensitivity of margin content detection:\n\n"
-            "• 0.1-0.4%: Extremely sensitive, flags minimal content\n"
-            "• 0.5%: Default - standard detection level\n"
-            "• 0.6-2.0%: Moderate tolerance\n"
+            "• 0.1-0.5%: Extremely sensitive, flags minimal content\n"
+            "• 1.0%: Default - standard detection level\n"
+            "• 1.1-2.0%: Moderate tolerance\n"
             "• 2.1-5.0%: More tolerant, ignores minor marks\n"
             "• 5.1-10.0%: Very tolerant, only flags substantial content\n\n"
-            "Recommended: Use 0.5% for standard document analysis."
+            "Recommended: Use 1.0% for standard document analysis."
         )
         threshold_help.grid(row=0, column=2, padx=5)
 
@@ -3115,16 +3115,16 @@ class DocumentAnalyzerGUI:
 
 def main() -> None:
     """Main entry point for the application"""
-    # Configure basic logging
-    # The format here is slightly different from the user request, but it's already in place.
-    # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
-    # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
-    # Will keep the existing format and ensure level is INFO.
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-                        handlers=[logging.StreamHandler()]) # Default to console
+        # Configure basic logging
+        # The format here is slightly different from the user request, but it's already in place.
+        # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
+        # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
+        # Will keep the existing format and ensure level is INFO.
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                            handlers=[logging.StreamHandler()]) # Default to console
 
-    logger.info("Application starting...") # Example of using the main logger
+        logger.info("Application starting...") # Example of using the main logger
 
     root = tk.Tk()
     app = None
