@@ -706,7 +706,7 @@ class DocumentAnalyzerGUI:
                     current_y = self.root.winfo_y()
 
                     # Calculate new height with log section, accounting for status bar
-                    log_height = 240  # Additional height for log section
+                    log_height = 200  # Additional height for log section
                     status_bar_height = 25  # Status bar height
                     new_height = current_height + log_height
 
