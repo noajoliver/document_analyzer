@@ -689,32 +689,27 @@ class DocumentAnalyzerGUI:
             foreground='blue',
             cursor='hand2'
         )
-        # MOVED: license_link.grid(row=0, column=1, padx=5, pady=2, sticky=tk.E)
-        # MOVED: license_link.bind('<Button-1>', lambda e: LicenseViewer(self.root))
+        # license_link is now child of status_bar, gridded below
 
-        # Frame for right-side links
-        links_frame = ttk.Frame(status_bar)
-        links_frame.grid(row=0, column=1, sticky=tk.E)
-
-        # User Guide link (NEW)
+        # User Guide link
         user_guide_link = ttk.Label(
-            links_frame, # Add to links_frame
+            status_bar, # Parent is status_bar
             text="User Guide",
             font=('Arial', 8, 'underline'),
             foreground='blue',
             cursor='hand2'
         )
-        user_guide_link.grid(row=0, column=0, padx=(0, 10), pady=2) # padx for spacing
+        user_guide_link.grid(row=0, column=1, padx=5, pady=2, sticky='s')
         user_guide_link.bind('<Button-1>', lambda e: self.open_user_guide())
 
-        # License link (now in links_frame)
-        license_link.grid(row=0, column=1, padx=(0, 5), pady=2) # Adjust padx as needed
+        # License link
+        license_link.grid(row=0, column=2, padx=5, pady=2, sticky=tk.E)
         license_link.bind('<Button-1>', lambda e: LicenseViewer(self.root))
 
-
         # Configure grid weights for status_bar
-        status_bar.columnconfigure(0, weight=1) # Author label takes available space
-        status_bar.columnconfigure(1, weight=0) # links_frame takes only needed space
+        status_bar.columnconfigure(0, weight=1) # Author label
+        status_bar.columnconfigure(1, weight=0) # User Guide link
+        status_bar.columnconfigure(2, weight=0) # License link
 
         return status_bar
 
