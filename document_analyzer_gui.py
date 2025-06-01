@@ -1707,7 +1707,7 @@ class DocumentAnalyzerGUI:
                     if isinstance(file_results, list):
                         results.extend(file_results)
                         # Check if any page in the PDF failed
-                        if any(res.get("Error") or "failed" in res.get("Content Status", "").lower() for res in file_results):
+                        if any(res and (res.get("Error") or "failed" in res.get("Content Status", "").lower()) for res in file_results):
                             self.processing_stats.increment_failed()
                         else:
                             self.processing_stats.increment_successful()
