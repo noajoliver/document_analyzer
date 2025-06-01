@@ -1,8 +1,11 @@
 # Document Margin Analyzer
 
-An application for analyzing PDF documents and images for content in header and footer areas.
+An application for analyzing PDF documents and images (including multi-page TIFF files) for content in header and footer areas.
 
 ## Features
+- Analyzes PDFs and images including multi-page TIFF files
+  * Each page in multi-page TIFFs is analyzed separately
+  * Supports both .tif and .tiff extensions
 - Configurable margin detection threshold (0.1-10.0%)
   * Default 1.0% threshold for standard detection
   * Fine control with 0.1% increments

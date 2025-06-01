@@ -1779,11 +1779,21 @@ class DocumentAnalyzerGUI:
                     return [minimize_result(result) for result in results]
                 return None
             else:
-                # For image files, use the page_analyzer directly
-                result = self.page_analyzer.analyze_image_file(os.path.abspath(file_path))
-                if result:
-                    return minimize_result(result)
-                return None
+                # Check if this is a multi-page image
+                is_multipage, page_count = self.page_analyzer.is_multipage_image(file_path)
+                
+                if is_multipage:
+                    # Process multi-page image (like TIFF)
+                    results = self.page_analyzer.analyze_multipage_image(os.path.abspath(file_path))
+                    if results:
+                        return [minimize_result(result) for result in results]
+                    return None
+                else:
+                    # Single page image
+                    result = self.page_analyzer.analyze_image_file(os.path.abspath(file_path))
+                    if result:
+                        return minimize_result(result)
+                    return None
 
         except Exception as e:
             self.handle_processing_error(e, file_path)

@@ -103,7 +103,8 @@ This section contains all the critical configuration options for your document a
   
 - **Image Files** ☑️: 
   - Supported formats: JPG, JPEG, PNG, BMP, and TIFF
-  - Each image is treated as a single page
+  - Multi-page TIFF files are fully supported (each page analyzed separately)
+  - Single-page images (JPG, PNG, BMP) treated as one page
   - Analyzes pixel content for marks in margin areas
   - Large images may require more processing time
 

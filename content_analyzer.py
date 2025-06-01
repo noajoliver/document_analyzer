@@ -17,7 +17,7 @@ import math
 import os
 import logging
 from dataclasses import dataclass
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Tuple, List
 
 import fitz
 import numpy as np
@@ -405,12 +405,67 @@ class PageAnalyzer:
             }
 
 
-    def analyze_image_file(self, image_path: str) -> Dict[str, Any]:
+    def is_multipage_image(self, image_path: str) -> Tuple[bool, int]:
+        """
+        Check if an image file contains multiple pages/frames
+        
+        Args:
+            image_path: Path to image file
+            
+        Returns:
+            Tuple of (is_multipage, page_count)
+        """
+        try:
+            with Image.open(image_path) as image:
+                if hasattr(image, 'n_frames'):
+                    return image.n_frames > 1, image.n_frames
+                return False, 1
+        except Exception:
+            return False, 1
+    
+    def analyze_multipage_image(self, image_path: str) -> List[Dict[str, Any]]:
+        """
+        Analyze all pages in a multi-page image file (e.g., TIFF)
+        
+        Args:
+            image_path: Path to multi-page image file
+            
+        Returns:
+            List of dicts containing analysis results for each page
+        """
+        results = []
+        abs_image_path = os.path.abspath(image_path)
+        
+        try:
+            with Image.open(abs_image_path) as image:
+                n_frames = getattr(image, 'n_frames', 1)
+                
+                for page_num in range(n_frames):
+                    result = self.analyze_image_file(image_path, page_num)
+                    results.append(result)
+                    
+        except Exception as e:
+            logger.error(f"Error processing multi-page image {abs_image_path}: {e}", exc_info=True)
+            # Return single error result
+            results.append({
+                "File": abs_image_path,
+                "Page": 1,
+                "Content Status": "Processing Failed",
+                "Type": "Image",
+                "Analysis Details": {},
+                "Error": str(e),
+                "Error Severity": "ERROR"
+            })
+            
+        return results
+
+    def analyze_image_file(self, image_path: str, page_num: int = 0) -> Dict[str, Any]:
         """
         Analyze an image file for margin content
 
         Args:
             image_path: Path to image file
+            page_num: Page number (0-based) for multi-page images
 
         Returns:
             Dict containing analysis results
@@ -418,8 +473,20 @@ class PageAnalyzer:
         abs_image_path = os.path.abspath(image_path)
         try:
             with Image.open(abs_image_path) as image:
+                # Check if this is a multi-page image (TIFF)
+                if hasattr(image, 'n_frames') and image.n_frames > 1:
+                    # Multi-page image - seek to the requested page
+                    try:
+                        image.seek(page_num)
+                    except EOFError:
+                        raise ValueError(f"Page {page_num + 1} does not exist in image (total pages: {image.n_frames})")
+                
                 image = image.convert('RGB')
-                analysis = self.content_analyzer.analyze_image_content(image)
+                analysis = self.content_analyzer.analyze_image_content(
+                    image,
+                    top_margin_percent=self.settings.top_margin_percent,
+                    bottom_margin_percent=self.settings.bottom_margin_percent
+                )
 
                 # Determine locations of content
                 locations = []
@@ -435,7 +502,7 @@ class PageAnalyzer:
 
                 return {
                     "File": abs_image_path,
-                    "Page": 1,
+                    "Page": page_num + 1,
                     "Content Status": content_status,
                     "Type": "Image",
                     "Analysis Details": {
@@ -454,7 +521,7 @@ class PageAnalyzer:
             logger.error(f"Failed to open image {abs_image_path}: {ioe}", exc_info=True)
             return {
                 "File": abs_image_path,
-                "Page": 1,
+                "Page": page_num + 1,
                 "Content Status": "Processing Failed",
                 "Type": "Image",
                 "Analysis Details": {},
@@ -465,7 +532,7 @@ class PageAnalyzer:
             logger.error(f"Error processing image {abs_image_path}: {e}", exc_info=True)
             return {
                 "File": abs_image_path,
-                "Page": 1,
+                "Page": page_num + 1,
                 "Content Status": "Processing Failed",
                 "Type": "Image",
                 "Analysis Details": {},
