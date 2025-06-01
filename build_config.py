@@ -20,6 +20,7 @@ import sys
 import traceback
 import zipfile
 from pathlib import Path
+import markdown
 
 import requests
 
@@ -224,6 +225,7 @@ data_files = [
     ('README.md', '.'),
     ('icon.ico', '.'),
     ('requirements.txt', '.'),
+    ('docs/USER_GUIDE.html', 'docs'),
 ]
 
 # Add additional module files
@@ -413,6 +415,7 @@ pyinstaller==6.3.0
 requests==2.32.0
 setuptools>=70.0.0
 wheel>=0.38.0
+markdown>=3.0
 
 # Additional dependencies for PDF processing
 pdf2image==1.16.3
@@ -420,6 +423,57 @@ pdf2image==1.16.3
     with open('requirements.txt', 'w', encoding='utf-8') as f:
         f.write(requirements.strip())
     print("Created requirements.txt file")
+
+
+def convert_md_to_html(md_file_path_str: str, html_file_path_str: str):
+    """Reads a Markdown file, converts it to HTML, and saves it."""
+    md_file_path = Path(md_file_path_str)
+    html_file_path = Path(html_file_path_str)
+
+    print(f"Converting {md_file_path} to {html_file_path}...")
+    try:
+        if not md_file_path.exists():
+            print(f"Error: Markdown file not found: {md_file_path}")
+            return
+
+        # Ensure output directory exists
+        html_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(md_file_path, 'r', encoding='utf-8') as f_md:
+            md_content = f_md.read()
+
+        html_body = markdown.markdown(md_content)
+
+        # Basic HTML structure
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Guide</title>
+    <style>
+        body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }}
+        h1, h2, h3 {{ color: #333; }}
+        code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
+        pre {{ background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
+        a {{ color: #007bff; }}
+        table {{ border-collapse: collapse; width: 100%; }}
+        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+        th {{ background-color: #f2f2f2; }}
+    </style>
+</head>
+<body>
+{html_body}
+</body>
+</html>"""
+
+        with open(html_file_path, 'w', encoding='utf-8') as f_html:
+            f_html.write(html_content)
+        print(f"Successfully converted to {html_file_path}")
+
+    except Exception as e:
+        print(f"Error converting Markdown to HTML: {e}")
+        traceback.print_exc()
 
 
 def cleanup_old_files():
@@ -529,6 +583,11 @@ def main():
 
     # Download and setup Poppler
     poppler_path = download_poppler()
+
+    # Convert USER_GUIDE.md to HTML
+    user_guide_md_path = os.path.join('docs', 'USER_GUIDE.md')
+    user_guide_html_path = os.path.join('docs', 'USER_GUIDE.html')
+    convert_md_to_html(user_guide_md_path, user_guide_html_path)
 
     # Create spec file
     create_spec_file(poppler_path)

@@ -22,6 +22,7 @@ import time
 import logging
 # GUI imports
 import tkinter as tk
+import webbrowser # Added for opening user guide
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from threading import Thread, Event, Lock
@@ -41,6 +42,18 @@ from pdf_utils import setup_poppler
 from sampling import FileProcessor, SamplingCalculator, SamplingParameters
 
 logger = logging.getLogger(__name__)
+
+
+def get_resource_path(relative_path: str) -> str:
+    """ Get absolute path to resource, works for dev and for PyInstaller. """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        # For development, _MEIPASS is not set, use current project directory
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 
 @dataclass
 class ProcessingStats:
@@ -442,6 +455,26 @@ class DocumentAnalyzerGUI:
         # Last sampling change tracker for mutual exclusivity
         self._last_sampling_change = None
 
+    def open_user_guide(self):
+        """Opens the user guide HTML file in the default web browser."""
+        # Path relative to the bundle/script root: 'docs/USER_GUIDE.html'
+        guide_file_relative_path = os.path.join('docs', 'USER_GUIDE.html')
+        guide_path_abs = get_resource_path(guide_file_relative_path)
+
+        self.log_message(f"Attempting to open user guide: {guide_path_abs}") # Log attempt
+
+        if os.path.exists(guide_path_abs):
+            try:
+                # Use file:// URI scheme for local files
+                webbrowser.open(f'file://{guide_path_abs}')
+                self.log_message("User guide opened successfully.")
+            except Exception as e:
+                self.log_message(f"Error opening user guide with webbrowser: {e}")
+                messagebox.showerror("Error", f"Could not open user guide: {e}")
+        else:
+            self.log_message(f"User guide file not found at: {guide_path_abs}")
+            messagebox.showerror("Error", f"User guide file not found at the expected location:\n{guide_path_abs}")
+
     def _init_components(self):
         """Initialize analysis components and settings tracker"""
         try:
@@ -656,12 +689,32 @@ class DocumentAnalyzerGUI:
             foreground='blue',
             cursor='hand2'
         )
-        license_link.grid(row=0, column=1, padx=5, pady=2, sticky=tk.E)
+        # MOVED: license_link.grid(row=0, column=1, padx=5, pady=2, sticky=tk.E)
+        # MOVED: license_link.bind('<Button-1>', lambda e: LicenseViewer(self.root))
+
+        # Frame for right-side links
+        links_frame = ttk.Frame(status_bar)
+        links_frame.grid(row=0, column=1, sticky=tk.E)
+
+        # User Guide link (NEW)
+        user_guide_link = ttk.Label(
+            links_frame, # Add to links_frame
+            text="User Guide",
+            font=('Arial', 8, 'underline'),
+            foreground='blue',
+            cursor='hand2'
+        )
+        user_guide_link.grid(row=0, column=0, padx=(0, 10), pady=2) # padx for spacing
+        user_guide_link.bind('<Button-1>', lambda e: self.open_user_guide())
+
+        # License link (now in links_frame)
+        license_link.grid(row=0, column=1, padx=(0, 5), pady=2) # Adjust padx as needed
         license_link.bind('<Button-1>', lambda e: LicenseViewer(self.root))
 
-        # Configure grid weights
-        status_bar.columnconfigure(0, weight=1)
-        status_bar.columnconfigure(1, weight=0)
+
+        # Configure grid weights for status_bar
+        status_bar.columnconfigure(0, weight=1) # Author label takes available space
+        status_bar.columnconfigure(1, weight=0) # links_frame takes only needed space
 
         return status_bar
 
@@ -3115,16 +3168,16 @@ class DocumentAnalyzerGUI:
 
 def main() -> None:
     """Main entry point for the application"""
-    # Configure basic logging
-    # The format here is slightly different from the user request, but it's already in place.
-    # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
-    # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
-    # Will keep the existing format and ensure level is INFO.
-    logging.basicConfig(level=logging.INFO,
-                        format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-                        handlers=[logging.StreamHandler()]) # Default to console
+        # Configure basic logging
+        # The format here is slightly different from the user request, but it's already in place.
+        # User request: '%(asctime)s - %(levelname)s - %(module)s - %(message)s'
+        # Current: '%(asctime)s - %(levelname)s - %(name)s - %(message)s' (using %(name)s is good)
+        # Will keep the existing format and ensure level is INFO.
+        logging.basicConfig(level=logging.INFO,
+                            format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
+                            handlers=[logging.StreamHandler()]) # Default to console
 
-    logger.info("Application starting...") # Example of using the main logger
+        logger.info("Application starting...") # Example of using the main logger
 
     root = tk.Tk()
     app = None
