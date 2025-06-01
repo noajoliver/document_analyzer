@@ -30,95 +30,593 @@ Document Margin Analyzer examines PDF documents and images to detect content in 
 ### Main Application Window
 ![Main Application Interface](images/main-window.png)
 
+The main application window provides a comprehensive interface for document analysis with the following key areas:
+
+- **Analysis Settings Panel** (Top): Configure all analysis parameters including thresholds, margins, and processing options
+- **Input/Output Configuration** (Middle): Select source documents and destination for results
+- **Progress Monitoring** (Bottom Left): Real-time progress bar and status updates during processing
+- **Activity Log** (Bottom Right): Detailed log of all operations, errors, and processing information
+- **Control Buttons**: Start Analysis, Pause/Resume, and Stop buttons for process control
+- **Status Bar**: Quick access to User Guide link and application information
+
 ### Analysis Settings Section
 ![Analysis Settings](images/analysis-settings.png)
+
+This section contains all the critical configuration options for your document analysis:
+
+- **Detection Settings**: Configure how sensitive the analysis should be to content in margins
+- **Processing Options**: Control CPU usage and sampling methods for optimal performance
 
 #### Input Selection
 ![Input Folder Selection](images/input-selection.png)
 
+**How to select your input folder:**
+
+1. **Click "Browse"** next to the Input Folder field
+2. **Navigate** to the folder containing your documents
+3. **Select the folder** and click "Select Folder"
+4. The application will:
+   - Scan the selected folder and all subfolders
+   - Count compatible files (PDFs and/or images)
+   - Display the file count below the input field
+   - Example: "Found 1,234 files (789 PDFs, 445 images)"
+
+**Important considerations:**
+- The folder can contain mixed file types - the analyzer will process only selected types
+- Subfolders are automatically included in the scan
+- Network drives and cloud-synced folders (OneDrive, Google Drive) are supported
+- System folders ($RECYCLE.BIN, System Volume Information) are automatically excluded
+- Ensure you have read permissions for all files in the selected folder
+
 #### Save Location
 ![Save Location Selection](images/save-location.png)
+
+**Setting up your output location:**
+
+1. **Click "Browse"** next to the Save Location field
+2. **Choose or create** a folder for the analysis results
+3. **Enter a filename** (without extension) or use the auto-generated name
+4. The application will:
+   - Automatically append the correct file extension (.csv, .parquet, or .db)
+   - Add timestamps to prevent overwriting existing files
+   - Create the output folder if it doesn't exist
+
+**Output naming convention:**
+- For CSV files exceeding row limits: `_part1`, `_part2`, etc. are appended
+
+**Storage requirements:**
+- CSV: Typically require 100-300 bytes per page analyzed, so analyzing 100,000 pages would need approximately 10-30 MB of disk space for the output file
+- Parquet: 30-50% less space than CSV
+- SQLite: Similar to Parquet with additional indexing overhead
+- Ensure sufficient free disk space before starting analysis
 
 #### File Types
 ![File Type Selection](images/file-types.png)
 
-- **PDF Files**: Analyzes both text and image content within PDFs
-- **Image Files**: Supports JPG, JPEG, PNG, BMP, and TIFF formats
+**Selecting file types to process:**
+
+- **PDF Files** ☑️: 
+  - Analyzes both text and image content within PDFs
+  - Processes each page individually
+  - Handles encrypted PDFs (reports as errors)
+  - Supports all standard PDF versions
+  
+- **Image Files** ☑️: 
+  - Supported formats: JPG, JPEG, PNG, BMP, and TIFF
+  - Each image is treated as a single page
+  - Analyzes pixel content for marks in margin areas
+  - Large images may require more processing time
+
+**Tips:**
+- Select both types for comprehensive analysis
+- Deselect a type to skip those files entirely
+- Processing time varies: PDFs with many pages take longer than single images
+- The file count updates dynamically when you change selections
 
 ## Configuration Options
 
 ### Analysis Configuration
 ![Analysis Configuration](images/analysis-config.png)
 
+The Analysis Configuration panel is where you fine-tune how the document analyzer examines your files. This section controls the core detection parameters that determine what content is flagged.
+
 #### Margin Configuration
-- **Top Margin (%)**: Percentage of page height to analyze from the top (0-50%)
-- **Bottom Margin (%)**: Percentage of page height to analyze from the bottom (0-50%)
-- Default: 5% for both margins
-- Example: 5% means the top 5% and bottom 5% of each page will be analyzed
+**Defining your document margins:**
+
+- **Top Margin (%)**: 
+  - Range: 0-50% of page height
+  - Default: 4.5%
+  - Purpose: Defines how much of the top of each page is considered the "header zone"
+  - Example: 5% on a standard 11" page = top 0.55 inches
+  
+- **Bottom Margin (%)**: 
+  - Range: 0-50% of page height  
+  - Default: 4.5%
+  - Purpose: Defines how much of the bottom of each page is considered the "footer zone"
+  - Example: 5% on a standard 11" page = bottom 0.55 inches
+
+**How to set margins:**
+1. Use the slider or type a value directly
+2. Consider your document layout:
+   - Standard documents: 4-6%
+   - Documents with large headers/footers: 8-12%
+   - Minimal margins: 2-3%
 
 #### Detection Threshold
 ![Threshold Configuration](images/threshold-config.png)
 
-- **Range**: 0.1% to 10.0%
-- **Default**: 0.5% (recommended for standard analysis)
-- **Sensitivity Levels**:
-  - 0.1-0.4%: Extremely sensitive, flags minimal content (even tiny dots or marks)
-  - 0.5%: Standard detection level (recommended)
-  - 0.6-2.0%: Moderate tolerance, ignores very small marks
-  - 2.1-5.0%: Ignores minor marks and artifacts
-  - 5.1-10.0%: Only flags substantial content
-- **Note**: The threshold represents the percentage of the margin area that must contain content to be flagged
+**Understanding the detection threshold:**
+
+The threshold determines how much content must be present in a margin area before it's flagged. This is the most critical setting for accurate analysis.
+
+- **Range**: 0.1% to 10.0% (adjustable in 0.1% increments)
+- **Default**: 0.5% (recommended starting point)
+- **What it means**: Percentage of the margin area that must contain marks/content
+
+**Sensitivity Levels and Use Cases**:
+
+- **0.1-0.4%** (Extremely Sensitive):
+  - Detects: Tiny dots, stray marks, compression artifacts
+  - Use for: Critical compliance checks, legal documents
+  - Warning: May produce false positives from scanner dust or artifacts
+  
+- **0.5%** (Standard - Recommended):
+  - Detects: Page numbers, small logos, watermarks
+  - Use for: General document quality control
+  - Best balance between sensitivity and accuracy
+  
+- **0.6-2.0%** (Moderate Tolerance):
+  - Detects: Substantial text, clear graphics
+  - Use for: Documents with known minor artifacts
+  - Ignores most compression artifacts and tiny marks
+  
+- **2.1-5.0%** (Lower Sensitivity):
+  - Detects: Large blocks of text, prominent graphics
+  - Use for: Quick screening of major issues
+  - Suitable for documents with acceptable small marks
+  
+- **5.1-10.0%** (Minimal Sensitivity):
+  - Detects: Only very substantial content
+  - Use for: Finding severe margin violations only
+  - Will miss small page numbers and watermarks
+
+**How to choose the right threshold:**
+1. Start with 0.5% for initial analysis
+2. Review a sample of results
+3. If too many false positives: Increase threshold
+4. If missing real content: Decrease threshold
+5. Document your chosen threshold for consistency
 
 #### CPU Configuration
 ![CPU Core Selection](images/cpu-config.png)
 
-- **Available Cores**: Shows your system's total CPU cores
-- **Default**: Uses all available cores minus one
+**Optimizing processing performance:**
+
+The CPU configuration controls how many processor cores are used for parallel document processing. Proper configuration ensures fast analysis without freezing your system.
+
+- **Available Cores**: Displays total CPU cores detected on your system
+- **Default Setting**: One-half the number of system cores (e.g., 4 cores on an 8-core system)
 - **Range**: 1 to maximum available cores
-- **Performance Tips**:
-  - More cores = faster processing
-  - Leave 1-2 cores free for system responsiveness
-  - Recommended: 75% of available cores for optimal performance
+
+**How to configure CPU usage:**
+
+1. **Check the dropdown** to see available options (e.g., "1 core" through "8 cores")
+2. **Consider your needs**:
+   - **Maximum Performance** (All cores):
+     - Use when: System is dedicated to analysis
+     - Benefit: Fastest possible processing
+     - Warning: System may become unresponsive
+   
+   - **Balanced** (75% of cores - Recommended):
+     - Use when: Need to use computer during analysis
+     - Benefit: Good speed while maintaining system responsiveness
+     - Example: 6 cores on an 8-core system
+   
+   - **Conservative** (50% of cores):
+     - Use when: Running other intensive applications
+     - Benefit: Ensures smooth multitasking
+     - Trade-off: Longer processing time
+   
+   - **Minimal** (1-2 cores):
+     - Use when: System resources are limited
+     - Benefit: Maximum system availability
+     - Best for: Background processing
+
+**Performance expectations:**
+- Each core processes files independently
+- Linear scaling: 8 cores ≈ 8x faster than 1 core
+- PDF processing benefits most from multiple cores
+- Memory usage increases with more cores
 
 ### Sampling Configuration
 ![Sampling Options](images/sampling-options.png)
 
+**When and how to use sampling:**
+
+Sampling allows you to analyze a subset of documents instead of processing everything. This is essential for large document collections where full analysis would take too long or isn't necessary.
+
 #### Statistical Sampling
-- **Purpose**: Analyze a representative sample instead of all files
-- **Confidence Level**: 90%, 95%, or 99% (default: 95%)
-- **Margin of Error**: 1%, 3%, 5%, or 10% (default: 5%)
-- **Use Case**: Large document sets where complete analysis is impractical
+**For scientifically valid sampling:**
+
+- **Purpose**: Analyze a mathematically representative sample of your documents
+- **How it works**: Calculates optimal sample size based on statistical principles
+
+**Configuration options:**
+
+1. **Confidence Level** (Dropdown):
+   - **90%**: Basic confidence, smaller sample size
+   - **95%**: Standard confidence (recommended)
+   - **99%**: High confidence, larger sample size
+   - Meaning: How sure you are that results represent the full dataset
+
+2. **Margin of Error** (Dropdown):
+   - **1%**: Very precise, requires large sample
+   - **3%**: High precision
+   - **5%**: Standard precision (recommended)
+   - **10%**: Lower precision, smaller sample
+   - Meaning: How much the sample results might differ from analyzing everything
+
+**Example scenarios:**
+- 10,000 documents with 95% confidence, 5% margin = ~370 file sample
+- 100,000 documents with 95% confidence, 5% margin = ~383 file sample
+- Note: Sample size plateaus for very large datasets
+
+**Best for:**
+- Compliance audits requiring statistical validity
+- Quality control with defined confidence requirements
+- Large datasets where patterns are more important than individual files
 
 #### Random N Sampling
-- **Purpose**: Analyze a fixed number of randomly selected files
-- **Options**: 10, 100, 500, 1000, 5000, or 10000 files
-- **Use Case**: Quick quality checks or testing
+**For fixed-size sampling:**
+
+- **Purpose**: Analyze exactly N randomly selected files
+- **How it works**: Randomly selects the specified number of files
+
+**Configuration options:**
+- **Sample Size** (Dropdown): 10, 100, 500, 1000, 5000, or 10000 files
+- **Selection**: Truly random across entire folder structure
+
+**Use cases by sample size:**
+- **10 files**: Quick spot check, settings verification
+- **100 files**: Basic quality assessment
+- **500 files**: Moderate confidence screening
+- **1000 files**: Detailed analysis of large datasets
+- **5000 files**: Comprehensive sampling
+- **10000 files**: Near-complete coverage for most needs
+
+**Best for:**
+- Initial testing of analysis settings
+- Time-boxed analysis (know exactly how many files)
+- Periodic quality checks
+- When statistical validity isn't required
+
+**Important notes:**
+- Only one sampling method can be active at a time
+- Files are selected before processing begins
+- Uncheck both options to analyze all files
 
 ### Output Configuration
 ![Output Settings](images/output-config.png)
 
-#### Output Format
-- **CSV**: Comma-separated values, compatible with Excel
-  - Max rows per file: 10,000 to 100,000 (configurable)
-  - Files are split automatically when limit is reached
-- **Parquet**: Efficient columnar format for large datasets
-  - Best for data analysis workflows
-  - Smaller file sizes than CSV
-- **SQLite**: Database format for querying results
-  - Ideal for complex analysis
-  - Supports SQL queries
+**Choosing the right output format and options:**
+
+The output configuration determines how your analysis results are saved and structured. Choose based on how you plan to use the data.
+
+#### Output Format Selection
+
+**1. CSV (Comma-Separated Values)** 📊
+- **Best for**: Excel users, simple reporting, sharing with others
+- **Advantages**:
+  - Opens directly in Excel/Google Sheets
+  - Human-readable text format
+  - Universal compatibility
+  - Easy to filter and sort
+- **Configuration**:
+  - **Max Rows per File**: 10,000 / 50,000 / 80,000 / 100,000
+  - Choose based on Excel version (older Excel: 65,536 rows limit)
+  - Files automatically split when limit reached
+  - Split files named: `_part1.csv`, `_part2.csv`, etc.
+- **File size**: Largest format, approximately 100-300 bytes per row
+
+**2. Parquet** 🗜️
+- **Best for**: Data science, big data workflows, Python/R analysis
+- **Advantages**:
+  - 60-80% smaller than CSV
+  - Preserves data types perfectly
+  - Very fast to read/write
+  - Columnar storage for efficient queries
+- **Compatibility**:
+  - Python: `pandas.read_parquet()`
+  - R: `arrow::read_parquet()`
+  - Apache Spark, Databricks, AWS Athena
+- **File size**: Highly compressed, ~40-60 bytes per row
+
+**3. SQLite Database** 🗃️
+- **Best for**: Complex queries, relational analysis, applications
+- **Advantages**:
+  - Full SQL query capability
+  - Indexed for fast searches
+  - Single file contains everything
+  - Can JOIN with other data
+- **Note**: Minimal Output mode is disabled for SQLite
+- **Usage examples**:
+  ```sql
+  SELECT * FROM analysis_results WHERE content_status LIKE '%header%';
+  SELECT COUNT(*) FROM analysis_results GROUP BY file_type;
+  ```
+- **File size**: Similar to Parquet with index overhead
 
 #### Minimal Output Mode
-- **Option**: "Minimal Output (File, Page, Content Status only)"
-- **Purpose**: Reduces output to essential information only
-- **Includes**: File path, page number, and content detection status
-- **Excludes**: Detailed percentages, analysis details, and error information
+**Streamlined results for basic needs:**
+
+☑️ **"Minimal Output (File, Page, Type, Content Status only)"**
+
+- **When enabled**:
+  - Only 4 columns in output
+  - Faster processing and smaller files
+  - Perfect for simple pass/fail reporting
+  
+- **What's included**:
+  1. **File**: Full path to document
+  2. **Page**: Page number
+  3. **Type**: PDF or Image
+  4. **Content Status**: Detection result
+  
+- **What's excluded**:
+  - Detailed percentages
+  - Text vs. image analysis breakdown
+  - Error details
+  - Margin configuration used
+  
+- **Best for**:
+  - Quick compliance checks
+  - Large-scale screening
+  - When you only need to know which files have issues
+  
+- **Not available for**: SQLite format (requires full schema)
 
 ### Progress Monitoring
 ![Progress Section](images/progress-section.png)
 
+**Real-time analysis tracking:**
+
+The progress section provides live feedback during document processing, helping you monitor the analysis and estimate completion time.
+
+**Progress indicators:**
+
+1. **Progress Bar**:
+   - Visual representation of completion percentage
+   - Green fill shows completed portion
+   - Updates in real-time as files are processed
+
+2. **Status Text**:
+   - Shows current operation (e.g., "Processing PDFs...", "Writing results...")
+   - Displays file counts: "Processed 1,234 of 5,678 files"
+   - Updates every few files for performance
+
+3. **Statistics Panel**:
+   - **Files/sec**: Current processing speed
+   - **Elapsed Time**: How long analysis has been running
+   - **Estimated Time**: Predicted time to completion
+   - **Success Rate**: Percentage of files processed without errors
+
+4. **Control Buttons**:
+   - **Pause**: Temporarily stops processing (can resume)
+   - **Resume**: Continues paused analysis
+   - **Stop**: Cancels analysis (cannot resume)
+
+**Understanding progress patterns:**
+- **Fast start**: Image files process quickly
+- **Slower middle**: Multi-page PDFs take longer
+- **Speed variations**: Normal due to file size differences
+- **Final phase**: Writing results may show 100% briefly
+
+**Performance indicators:**
+- **Good**: 10-50 files/second for mixed content
+- **Normal**: 5-10 files/second for complex PDFs
+- **Slow**: <5 files/second (check CPU settings)
+
 ### Log View
 ![Log Section](images/log-section.png)
+
+**Detailed operation tracking:**
+
+The log section provides a comprehensive record of all operations, making it invaluable for troubleshooting and verification.
+
+**Log entry types:**
+
+1. **Information Messages** (Black text):
+   - Normal operations: "Processing PDF 123/456..."
+   - Configuration details: "Using 6 CPU cores"
+   - Progress updates: "Batch complete"
+
+2. **Success Messages** (Green text):
+   - Successful operations: "Analysis complete"
+   - Milestone achievements: "Output file created"
+
+3. **Warning Messages** (Orange text):
+   - Non-critical issues: "Skipping encrypted file"
+   - Performance advisories: "Low memory detected"
+
+4. **Error Messages** (Red text):
+   - Processing failures: "Failed to open file"
+   - Critical issues: "Insufficient disk space"
+
+**Log features:**
+
+- **Auto-scroll**: Follows latest entries automatically
+- **Timestamps**: Each entry shows when it occurred
+- **Copy capability**: Select and copy text for reports
+- **Persistent**: Remains available after analysis completes
+- **Detailed errors**: Full error messages and stack traces
+
+**Using the log effectively:**
+
+1. **During analysis**:
+   - Monitor for repeated errors
+   - Check processing speed
+   - Verify correct files are being processed
+
+2. **After completion**:
+   - Review error summary
+   - Check total files processed
+   - Identify problem files
+   - Copy important messages
+
+3. **For troubleshooting**:
+   - Look for error patterns
+   - Check file paths for access issues
+   - Verify configuration was applied
+   - Save log content before closing
+
+**Log messages to watch for:**
+- "Using statistical sampling" - Confirms sampling is active
+- "Writing results to" - Shows output location
+- "Analysis complete" - Successful completion
+- "Error summary" - Lists all problems encountered
+
+## Recommended Workflow
+
+### Overview
+The Document Margin Analyzer is designed for an iterative workflow that ensures accurate results before processing large document sets. This approach saves time and computing resources while maximizing accuracy.
+
+### Step 1: Initial Testing with Sample Set
+**Start small to dial in your settings:**
+
+1. **Utilize the Random Sample of N Files option** with 100 or 500 representative documents (depending on your dataset size)
+   - Include various document types you'll be analyzing
+   - Mix of good documents and known issues
+   - Different sources (scanned, digital, faxed)
+
+2. **Use default settings** for first run:
+   - Threshold: 0.5% (standard sensitivity)
+   - Margins: 4.5% top and bottom (≈0.5" on 8.5x11" paper)
+   - All file types selected
+   - No sampling (analyze all test files)
+   - Full output mode (not minimal)
+
+3. **Run initial analysis** and review results carefully
+
+### Step 2: Visual Validation
+**Compare results with actual documents:**
+
+1. **Open flagged documents** in your PDF/image viewer
+2. **Check each reported issue**:
+   - Is the content actually in the margin?
+   - Is it content you care about?
+   - Are there false positives?
+
+3. **Document patterns**:
+   - Faxed documents may have edge artifacts
+   - Scanned documents might have dust/specks
+   - Digital PDFs typically have cleaner margins
+
+### Step 3: Iterative Refinement
+**Adjust settings based on findings:**
+
+**If too many false positives (detecting irrelevant marks):**
+- Increase threshold incrementally (0.5% → 0.8% → 1.2%)
+- Faxed documents often need 1.0-2.0% threshold
+- Poor quality scans may need 2.0-3.0%
+
+**If missing real content:**
+- Decrease threshold (0.5% → 0.3% → 0.2%)
+- Check if margins are set correctly
+- Verify page orientation is consistent
+
+**For non-standard page sizes:**
+- Adjust margin percentages
+- Legal size (8.5x14"): Consider 3.5% margins
+- A4 paper: Default 4.5% usually works
+- Custom sizes: Calculate based on actual measurements
+
+**Special considerations by document type:**
+- **Faxed documents**: Often need 1.0-2.0% threshold due to transmission artifacts
+- **Scanned documents**: May need 0.8-1.5% threshold for dust/specks
+- **Digital PDFs**: Can use 0.3-0.5% for high sensitivity
+- **Mixed sources**: Use threshold that works for lowest quality
+
+### Step 4: Production Run Strategy
+**Once settings are optimized:**
+
+1. **For complete analysis** (smaller datasets <10,000 files):
+   - Use your refined settings
+   - Enable minimal output for pass/fail results
+   - Review summary statistics first
+
+2. **For large datasets** (>10,000 files):
+   - Enable statistical sampling (95% confidence, 5% margin)
+   - This typically analyzes 300-400 files regardless of total size
+   - Provides scientifically valid results
+
+3. **For ongoing monitoring**:
+   - Use Random N sampling (500-1000 files)
+   - Run periodically with same settings
+   - Track trends over time
+
+### Step 5: Results Interpretation
+**Understanding your output:**
+
+**During testing phase (full output):**
+- Review all columns to understand detection patterns
+- Pay attention to percentages - they indicate severity
+- Use Error column to identify problem files
+
+**During production (minimal output):**
+- Focus on Content Status column
+- "All content within margins" = Pass
+- Any other status = Requires review
+- Sort/filter by status for efficient review
+
+### Practical Example Workflow
+
+**Scenario**: Analyzing 50,000 archived documents (mix of scanned and faxed)
+
+1. **Test Phase**:
+   - Test 100 files using Random N sampling
+   - Run with defaults (0.5% threshold, 4.5% margins)
+   - Results show 40% false positives from fax artifacts
+
+2. **Refinement**:
+   - Increase threshold to 1.0% - still 20% false positives
+   - Increase to 1.5% - 5% false positives, acceptable
+   - Verify no real issues were missed
+
+3. **Production**:
+   - Configure: 1.5% threshold, statistical sampling
+   - Enable minimal output
+   - Run analysis - processes 385 files in 2 minutes
+   - Results: 8% of documents have margin content
+
+4. **Follow-up**:
+   - Filter results for files with issues
+   - Batch review flagged documents
+   - Take corrective action as needed
+
+### Tips for Success
+
+1. **Document your settings**:
+   - Record final threshold and margins used
+   - Note document types and quality levels
+   - Save for consistent future analyses
+
+2. **Quality control**:
+   - Periodically re-test with known documents
+   - Adjust if document quality changes
+   - Monitor false positive rates
+
+3. **Performance optimization**:
+   - Test settings thoroughly before large runs
+   - Use sampling for initial assessment
+   - Run full analysis only when necessary
+
+4. **Common threshold guidelines**:
+   - **0.1-0.4%**: Digital PDFs, critical compliance
+   - **0.5-0.8%**: Standard mixed documents
+   - **1.0-2.0%**: Faxed or lower quality scans
+   - **2.0-5.0%**: Poor quality, artifact-heavy documents
+
+Remember: Time spent optimizing settings on a small sample saves hours on large datasets and ensures accurate, actionable results.
 
 ## Analysis Process
 
@@ -146,8 +644,7 @@ Document Margin Analyzer examines PDF documents and images to detect content in 
 ## Output Formats
 
 ### Output File Naming
-- Base format: `document_analysis_YYYYMMDD_HHMMSS`
-- CSV with splitting: `document_analysis_YYYYMMDD_HHMMSS_part1.csv`, etc.
+- CSV with splitting: `document_analysis_part1.csv`, etc.
 - Extensions: `.csv`, `.parquet`, `.db` (SQLite)
 
 ### Output Columns
@@ -186,12 +683,14 @@ Document Margin Analyzer examines PDF documents and images to detect content in 
 #### Parquet Files
 - Use Python with pandas: `pd.read_parquet('file.parquet')`
 - Compatible with Apache Spark, R, and other data tools
+- Can be viewed using VS Code with Parquet extension (display as JSON)
 - Compressed format saves disk space
 
 #### SQLite Database
 - Use any SQLite browser or client
+- Can be viewed using VS Code with SQLite extension or using DBeaver or DBVisualizer
 - Query with SQL: `SELECT * FROM results WHERE content_status != 'All content within margins'`
-- Table name: `results`
+- Table name: `analysis_results`
 
 ## Troubleshooting
 
@@ -223,11 +722,9 @@ Document Margin Analyzer examines PDF documents and images to detect content in 
   - Reduce number of CPU cores if system becomes unresponsive
   - Enable sampling for very large datasets
   - Close other memory-intensive applications
-  - Check available disk space (need 2-3x dataset size)
+  - Check available disk space 
 - **Memory Errors**:
   - Process fewer files at once using sampling
-  - Reduce DPI setting in configuration (if available)
-  - Use 64-bit version of the application
 
 #### 5. Output File Issues
 - **Cannot Write Output**:
@@ -237,7 +734,7 @@ Document Margin Analyzer examines PDF documents and images to detect content in 
 - **CSV File Too Large for Excel**:
   - Reduce max rows per file setting
   - Use Parquet format for large datasets
-  - Open in specialized data tools
+  - Open in specialized data tools - notepad++ with the CsvQuery plugin works well for large CSV files
 
 ### Error Messages in Output
 
@@ -262,8 +759,8 @@ The application includes detailed error tracking:
 
 ### Batch Processing
 - Files are processed in batches for memory efficiency
-- Default batch size: 100 files
-- Automatic memory management prevents overload
+- Default batch size: 1000 files
+- Batch processing helps manage memory usage
 
 ### Error Recovery
 - Processing continues even if individual files fail
@@ -272,7 +769,6 @@ The application includes detailed error tracking:
 
 ### Status Bar Features
 - **User Guide Link**: Click to open this guide in your browser
-- **Version Information**: Shows current application version
 - **License Link**: View GPL v3.0 license details
 
 ### Keyboard Shortcuts
