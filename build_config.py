@@ -19,6 +19,7 @@ import shutil
 import sys
 import traceback
 import zipfile
+import glob
 from pathlib import Path
 import markdown
 
@@ -205,6 +206,7 @@ def create_spec_file(poppler_path):
 
 import os
 import json
+import glob
 from pathlib import Path
 from datetime import datetime
 
@@ -227,6 +229,11 @@ data_files = [
     ('requirements.txt', '.'),
     ('docs/USER_GUIDE.html', 'docs'),
 ]
+
+# Add documentation images
+for img_file in glob.glob('docs/images/*'):
+    if os.path.isfile(img_file):
+        data_files.append((img_file, 'docs/images'))
 
 # Add additional module files
 module_files = [
@@ -427,6 +434,9 @@ pdf2image==1.16.3
 
 def convert_md_to_html(md_file_path_str: str, html_file_path_str: str):
     """Reads a Markdown file, converts it to HTML, and saves it."""
+    import base64
+    import re
+    
     md_file_path = Path(md_file_path_str)
     html_file_path = Path(html_file_path_str)
 
@@ -442,24 +452,101 @@ def convert_md_to_html(md_file_path_str: str, html_file_path_str: str):
         with open(md_file_path, 'r', encoding='utf-8') as f_md:
             md_content = f_md.read()
 
+        # Convert markdown to HTML
         html_body = markdown.markdown(md_content)
+        
+        # Find all image references and embed them as base64
+        img_pattern = re.compile(r'<img[^>]*src="([^"]+)"[^>]*>')
+        
+        def replace_image(match):
+            img_path = match.group(1)
+            # Construct full path relative to markdown file
+            full_img_path = md_file_path.parent / img_path
+            
+            if full_img_path.exists():
+                try:
+                    with open(full_img_path, 'rb') as img_file:
+                        img_data = img_file.read()
+                        img_base64 = base64.b64encode(img_data).decode('utf-8')
+                        
+                    # Determine MIME type
+                    ext = full_img_path.suffix.lower()
+                    mime_types = {'.png': 'image/png', '.jpg': 'image/jpeg', 
+                                  '.jpeg': 'image/jpeg', '.gif': 'image/gif'}
+                    mime_type = mime_types.get(ext, 'image/png')
+                    
+                    # Return img tag with base64 data
+                    return f'<img src="data:{mime_type};base64,{img_base64}" alt="{full_img_path.stem}">'
+                except Exception as e:
+                    print(f"Warning: Could not embed image {img_path}: {e}")
+                    return match.group(0)
+            else:
+                print(f"Warning: Image not found: {full_img_path}")
+                return match.group(0)
+        
+        # Replace all image references with base64 embedded images
+        html_body = img_pattern.sub(replace_image, html_body)
 
-        # Basic HTML structure
+        # Basic HTML structure with improved styling
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>User Guide</title>
+    <title>Document Margin Analyzer - User Guide</title>
     <style>
-        body {{ font-family: sans-serif; line-height: 1.6; padding: 20px; max-width: 800px; margin: 0 auto; }}
-        h1, h2, h3 {{ color: #333; }}
-        code {{ background-color: #f4f4f4; padding: 2px 4px; border-radius: 4px; }}
-        pre {{ background-color: #f4f4f4; padding: 10px; border-radius: 4px; overflow-x: auto; }}
-        a {{ color: #007bff; }}
-        table {{ border-collapse: collapse; width: 100%; }}
-        th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-        th {{ background-color: #f2f2f2; }}
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 900px;
+            margin: 0 auto;
+            color: #333;
+        }}
+        h1, h2, h3 {{ color: #2c3e50; }}
+        h1 {{ border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+        h2 {{ margin-top: 30px; }}
+        code {{ 
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }}
+        pre {{ 
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            border: 1px solid #e1e4e8;
+        }}
+        a {{ color: #3498db; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+        table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+        th, td {{ 
+            border: 1px solid #ddd;
+            padding: 12px;
+            text-align: left;
+        }}
+        th {{ 
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 20px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }}
+        ul {{ line-height: 1.8; }}
+        li {{ margin-bottom: 5px; }}
+        blockquote {{
+            border-left: 4px solid #3498db;
+            padding-left: 15px;
+            margin: 20px 0;
+            color: #666;
+        }}
     </style>
 </head>
 <body>
@@ -470,6 +557,11 @@ def convert_md_to_html(md_file_path_str: str, html_file_path_str: str):
         with open(html_file_path, 'w', encoding='utf-8') as f_html:
             f_html.write(html_content)
         print(f"Successfully converted to {html_file_path}")
+        
+        # Count embedded images
+        embedded_count = len(img_pattern.findall(html_body))
+        if embedded_count > 0:
+            print(f"Embedded {embedded_count} images into the HTML file")
 
     except Exception as e:
         print(f"Error converting Markdown to HTML: {e}")
