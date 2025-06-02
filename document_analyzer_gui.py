@@ -43,6 +43,24 @@ from sampling import FileProcessor, SamplingCalculator, SamplingParameters
 
 logger = logging.getLogger(__name__)
 
+# S3 support imports
+try:
+    from s3_handler import S3FileHandler, S3Config, S3_AVAILABLE
+    from s3_file_processor import S3FileProcessor, S3ProcessingOptions, create_s3_processor
+    from s3_gui_components import S3ConfigDialog, S3BrowserDialog, check_s3_available
+    from s3_output_wrapper import S3OutputWrapper
+    logger.info(f"S3 support enabled (boto3 available)")
+except ImportError as e:
+    logger.warning(f"S3 support disabled (boto3 not installed): {e}")
+    S3_AVAILABLE = False
+    S3FileHandler = None
+    S3FileProcessor = None
+    create_s3_processor = None
+    S3ConfigDialog = None
+    S3BrowserDialog = None
+    S3OutputWrapper = None
+    check_s3_available = lambda: False
+
 
 def get_resource_path(relative_path: str) -> str:
     """ Get absolute path to resource, works for dev and for PyInstaller. """
@@ -234,6 +252,12 @@ class AnalysisSettings:
     minimal_output: bool = False
     top_margin_percent: float = 4.5     # Default: top 4.5% of the page
     bottom_margin_percent: float = 4.5  # Default: bottom 4.5% of the page
+    # S3 settings
+    use_s3_input: bool = False
+    s3_input_path: Optional[str] = None
+    use_s3_output: bool = False
+    s3_output_path: Optional[str] = None
+    s3_config: Optional['S3Config'] = None
 
     def __post_init__(self):
         """Validate settings after initialization"""
@@ -455,6 +479,13 @@ class DocumentAnalyzerGUI:
 
         # Last sampling change tracker for mutual exclusivity
         self._last_sampling_change = None
+        
+        # S3 related variables
+        self.input_source = tk.StringVar(value="local")  # "local" or "s3"
+        self.output_destination = tk.StringVar(value="local")  # "local" or "s3"
+        self.s3_config = None  # Will hold S3Config instance
+        self.s3_handler = None  # Will hold S3FileHandler instance
+        self.s3_processor = None  # Will hold S3FileProcessor instance
 
     def open_user_guide(self):
         """Opens the user guide HTML file in the default web browser."""
@@ -534,8 +565,14 @@ class DocumentAnalyzerGUI:
                 include_pdfs=self.include_pdfs.get(),
                 include_images=self.include_images.get(),
                 minimal_output=self.minimal_output.get(),
-                top_margin_percent=self.top_margin_percent.get(),  # new
-                bottom_margin_percent=self.bottom_margin_percent.get()  # new
+                top_margin_percent=self.top_margin_percent.get(),
+                bottom_margin_percent=self.bottom_margin_percent.get(),
+                # S3 settings
+                use_s3_input=self.input_source.get() == "s3",
+                s3_input_path=self.folder_entry.get() if self.input_source.get() == "s3" else None,
+                use_s3_output=self.output_destination.get() == "s3",
+                s3_output_path=self.save_entry.get() if self.output_destination.get() == "s3" else None,
+                s3_config=self.s3_config
             )
         except ValueError as e:
             raise ValueError(f"Invalid settings values: {str(e)}")
@@ -565,7 +602,13 @@ class DocumentAnalyzerGUI:
                 include_images=self.include_images.get(),
                 minimal_output=self.minimal_output.get() if hasattr(self, 'minimal_output') else False,
                 top_margin_percent=self.top_margin_percent.get(),
-                bottom_margin_percent=self.bottom_margin_percent.get()
+                bottom_margin_percent=self.bottom_margin_percent.get(),
+                # S3 settings
+                use_s3_input=self.input_source.get() == "s3",
+                s3_input_path=self.folder_entry.get() if self.input_source.get() == "s3" else None,
+                use_s3_output=self.output_destination.get() == "s3",
+                s3_output_path=self.save_entry.get() if self.output_destination.get() == "s3" else None,
+                s3_config=self.s3_config
             )
 
             # Update instance settings
@@ -956,6 +999,10 @@ class DocumentAnalyzerGUI:
 
         # Set up initial window geometry
         self.setup_window_geometry()
+        
+        # Initialize S3 if available
+        if S3_AVAILABLE:
+            self.initialize_s3()
 
     def setup_window_geometry(self) -> None:
         """Configure initial window size and position"""
@@ -1172,29 +1219,62 @@ class DocumentAnalyzerGUI:
         file_frame = ttk.Frame(parent)
         file_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 
+        # Input source selection (Local vs S3)
+        input_source_frame = ttk.Frame(file_frame)
+        input_source_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
+        
+        ttk.Label(input_source_frame, text="Input Source:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        ttk.Radiobutton(input_source_frame, text="Local Folder", 
+                       variable=self.input_source, value="local",
+                       command=self.update_input_widgets).grid(row=0, column=1, padx=5)
+        
+        if S3_AVAILABLE:
+            ttk.Radiobutton(input_source_frame, text="S3 Bucket", 
+                           variable=self.input_source, value="s3",
+                           command=self.update_input_widgets).grid(row=0, column=2, padx=5)
+            ttk.Button(input_source_frame, text="S3 Config", 
+                      command=self.configure_s3).grid(row=0, column=3, padx=5)
+
         # Input folder selection
         input_frame = ttk.Frame(file_frame)
-        input_frame.grid(row=0, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
+        input_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
 
-        ttk.Label(input_frame, text="Input Folder:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.input_label = ttk.Label(input_frame, text="Input Folder:")
+        self.input_label.grid(row=0, column=0, sticky=tk.W, padx=5)
         self.folder_entry = ttk.Entry(input_frame)
         self.folder_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
-        ttk.Button(input_frame, text="Browse", command=self.browse_folder).grid(row=0, column=2, padx=5)
+        self.input_browse_btn = ttk.Button(input_frame, text="Browse", command=self.browse_input)
+        self.input_browse_btn.grid(row=0, column=2, padx=5)
         input_frame.columnconfigure(1, weight=1)
+
+        # Output destination selection (Local vs S3)
+        output_dest_frame = ttk.Frame(file_frame)
+        output_dest_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
+        
+        ttk.Label(output_dest_frame, text="Output Destination:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        ttk.Radiobutton(output_dest_frame, text="Local Folder", 
+                       variable=self.output_destination, value="local",
+                       command=self.update_output_widgets).grid(row=0, column=1, padx=5)
+        if S3_AVAILABLE:
+            ttk.Radiobutton(output_dest_frame, text="S3 Bucket", 
+                           variable=self.output_destination, value="s3",
+                           command=self.update_output_widgets).grid(row=0, column=2, padx=5)
 
         # Save location selection
         save_frame = ttk.Frame(file_frame)
-        save_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
+        save_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=2)
 
-        ttk.Label(save_frame, text="Save Location:").grid(row=0, column=0, sticky=tk.W, padx=5)
+        self.output_label = ttk.Label(save_frame, text="Save Location:")
+        self.output_label.grid(row=0, column=0, sticky=tk.W, padx=5)
         self.save_entry = ttk.Entry(save_frame)
         self.save_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=5)
-        ttk.Button(save_frame, text="Browse", command=self.browse_save_location).grid(row=0, column=2, padx=5)
+        self.output_browse_btn = ttk.Button(save_frame, text="Browse", command=self.browse_output)
+        self.output_browse_btn.grid(row=0, column=2, padx=5)
         save_frame.columnconfigure(1, weight=1)
 
         # File type selection with recount trigger
         type_frame = ttk.Frame(file_frame)
-        type_frame.grid(row=2, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
+        type_frame.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=5)
 
         # File type selection label
         ttk.Label(type_frame, text="File Types to Process:",
@@ -1636,15 +1716,36 @@ class DocumentAnalyzerGUI:
                 show_progress=True
             )
 
-            # Get file list with options and convert all paths to absolute
-            files_to_process = [os.path.abspath(f) for f in FileProcessor.get_file_list(
-                self.folder_entry.get(),
-                self.include_pdfs.get(),
-                self.include_images.get(),
-                self.SUPPORTED_FORMATS,
-                options=options,
-                progress_callback=progress_update
-            )]
+            # Get file list based on source type
+            if self.settings.use_s3_input:
+                # S3 file processing
+                if not self.s3_processor:
+                    self.handle_ui_error(Exception("S3 processor not initialized"))
+                    return
+                    
+                # Get S3 file list
+                s3_files = self.s3_processor.get_s3_file_list(
+                    self.settings.s3_input_path,
+                    self.include_pdfs.get(),
+                    self.include_images.get(),
+                    self.SUPPORTED_FORMATS,
+                    progress_callback=progress_update
+                )
+                
+                # For S3, we'll process files differently
+                files_to_process = s3_files  # Keep as S3 file info dicts
+                is_s3 = True
+            else:
+                # Local file processing
+                files_to_process = [os.path.abspath(f) for f in FileProcessor.get_file_list(
+                    self.folder_entry.get(),
+                    self.include_pdfs.get(),
+                    self.include_images.get(),
+                    self.SUPPORTED_FORMATS,
+                    options=options,
+                    progress_callback=progress_update
+                )]
+                is_s3 = False
 
             if not files_to_process:
                 self.handle_no_files()
@@ -1692,40 +1793,65 @@ class DocumentAnalyzerGUI:
 
             # Process each file
             results = []
-            for file_path in files_to_process:
-                if self.stop_event.is_set():
-                    break
-
-                while self.pause_event.is_set():
+            
+            if is_s3:
+                # Process S3 files with batch download
+                self.log_message("Processing S3 files...")
+                self.processing_stats.start(total_files)
+                
+                def s3_processor(local_path):
+                    """Process a single downloaded S3 file"""
+                    return self.process_single_file(local_path)
+                
+                # Process S3 files in batches
+                batch_results = self.s3_processor.process_s3_files_parallel(
+                    files_to_process,
+                    s3_processor,
+                    self.selected_cores.get(),
+                    progress_callback=lambda msg: self.queue.put(("log", msg))
+                )
+                
+                results.extend(batch_results)
+                processed_count = len(files_to_process)
+                self.processing_stats.update(processed_count)
+                
+            else:
+                # Process local files
+                self.processing_stats.start(total_files)
+                for file_path in files_to_process:
                     if self.stop_event.is_set():
                         break
-                    time.sleep(0.1)
 
-                file_results = self.process_single_file(file_path)
-                if file_results:
-                    # Handle both single results and lists of results
-                    if isinstance(file_results, list):
-                        results.extend(file_results)
-                        # Check if any page in the PDF failed
-                        if any(res and (res.get("Error") or "failed" in res.get("Content Status", "").lower()) for res in file_results):
-                            self.processing_stats.increment_failed()
-                        else:
-                            self.processing_stats.increment_successful()
-                    elif isinstance(file_results, dict):
-                        results.append(file_results)
-                        if file_results.get("Error") or "failed" in file_results.get("Content Status", "").lower():
-                            self.processing_stats.increment_failed()
-                        else:
-                            self.processing_stats.increment_successful()
-                    # If file_results is None, it means processing failed at a higher level or was skipped
-                    elif file_results is None:
-                         self.processing_stats.increment_failed()
+                    while self.pause_event.is_set():
+                        if self.stop_event.is_set():
+                            break
+                        time.sleep(0.1)
 
-                processed_count += 1 # This is the count of files attempted from the files_to_process list
-                self.processing_stats.update(processed_count) # Update total_processed for rate calculation
-                progress = (processed_count / total_files) * 100 # total_files here is len(files_to_process)
-                self.queue.put(("progress", progress))
-                self.queue.put(("status", f"Processed {processed_count:,} of {total_files:,} files"))
+                    file_results = self.process_single_file(file_path)
+                    if file_results:
+                        # Handle both single results and lists of results
+                        if isinstance(file_results, list):
+                            results.extend(file_results)
+                            # Check if any page in the PDF failed
+                            if any(res and (res.get("Error") or "failed" in res.get("Content Status", "").lower()) for res in file_results):
+                                self.processing_stats.increment_failed()
+                            else:
+                                self.processing_stats.increment_successful()
+                        elif isinstance(file_results, dict):
+                            results.append(file_results)
+                            if file_results.get("Error") or "failed" in file_results.get("Content Status", "").lower():
+                                self.processing_stats.increment_failed()
+                            else:
+                                self.processing_stats.increment_successful()
+                        # If file_results is None, it means processing failed at a higher level or was skipped
+                        elif file_results is None:
+                             self.processing_stats.increment_failed()
+
+                    processed_count += 1 # This is the count of files attempted from the files_to_process list
+                    self.processing_stats.update(processed_count) # Update total_processed for rate calculation
+                    progress = (processed_count / total_files) * 100 # total_files here is len(files_to_process)
+                    self.queue.put(("progress", progress))
+                    self.queue.put(("status", f"Processed {processed_count:,} of {total_files:,} files"))
 
             # Write results
             if results:
@@ -1922,14 +2048,32 @@ class DocumentAnalyzerGUI:
         """
         try:
             save_path = self.save_entry.get()
-            self.current_output_handler = create_output_handler(
+            
+            # Create base output handler
+            base_handler = create_output_handler(
                 self.settings.output_format,
                 save_path,
                 self.settings
             )
-            self.log_message(
-                f"Initialized {self.settings.output_format.upper()} output handler"
-            )
+            
+            # Wrap with S3 handler if using S3 output
+            if self.settings.use_s3_output and S3_AVAILABLE:
+                if not self.s3_handler:
+                    raise RuntimeError("S3 handler not initialized")
+                    
+                self.current_output_handler = S3OutputWrapper(
+                    base_handler,
+                    self.s3_handler,
+                    self.settings.s3_output_path
+                )
+                self.log_message(
+                    f"Initialized {self.settings.output_format.upper()} output handler with S3 upload to {self.settings.s3_output_path}"
+                )
+            else:
+                self.current_output_handler = base_handler
+                self.log_message(
+                    f"Initialized {self.settings.output_format.upper()} output handler"
+                )
 
         except Exception as e:
             raise RuntimeError(f"Failed to initialize output handler: {str(e)}")
@@ -2242,22 +2386,53 @@ class DocumentAnalyzerGUI:
                     self.settings = replace(self.settings, total_files=0)
                 return 0
 
-            if not os.path.exists(path_to_check):
-                self.file_count_var.set("Selected folder not found")
-                self.file_count_label.configure(foreground='red')
-                if hasattr(self, 'settings'):
-                    self.settings = replace(self.settings, total_files=0)
-                return 0
+            # Check if this is an S3 path
+            if path_to_check.startswith('s3://'):
+                # Handle S3 file counting
+                if not self.s3_processor:
+                    self.file_count_var.set("S3 not configured")
+                    self.file_count_label.configure(foreground='red')
+                    return 0
+                
+                try:
+                    self.file_count_var.set("Counting S3 files...")
+                    self.file_count_label.configure(foreground='blue')
+                    self.root.update_idletasks()
+                    
+                    # Get S3 file list
+                    s3_files = self.s3_processor.get_s3_file_list(
+                        path_to_check,
+                        self.include_pdfs.get(),
+                        self.include_images.get(),
+                        self.SUPPORTED_FORMATS,
+                        progress_callback=lambda msg: logger.debug(msg) if trigger != "checkbox" else None
+                    )
+                    
+                    # Convert S3 file info to simple file list for counting
+                    files = [f['Key'] for f in s3_files]
+                    
+                except Exception as e:
+                    self.file_count_var.set(f"S3 error: {str(e)}")
+                    self.file_count_label.configure(foreground='red')
+                    return 0
+            else:
+                # Local file path handling
+                if not os.path.exists(path_to_check):
+                    self.file_count_var.set("Selected folder not found")
+                    self.file_count_label.configure(foreground='red')
+                    if hasattr(self, 'settings'):
+                        self.settings = replace(self.settings, total_files=0)
+                    return 0
 
-            # Count files
-            files = FileProcessor.get_file_list(
-                path_to_check,
-                self.include_pdfs.get(),
-                self.include_images.get(),
-                self.SUPPORTED_FORMATS,
-                options=self.processing_options,
-                progress_callback=lambda msg: logger.debug(msg) if trigger != "checkbox" else None
-            )
+                # Count files
+                files = FileProcessor.get_file_list(
+                    path_to_check,
+                    self.include_pdfs.get(),
+                    self.include_images.get(),
+                    self.SUPPORTED_FORMATS,
+                    options=self.processing_options,
+                    progress_callback=lambda msg: logger.debug(msg) if trigger != "checkbox" else None
+                )
 
             total_files = len(files)
 
@@ -2492,9 +2667,39 @@ class DocumentAnalyzerGUI:
             messagebox.showerror("Error", "Please select at least one file type to process!")
             return False
 
-        if not os.path.exists(self.folder_entry.get()):
-            messagebox.showerror("Error", "Selected folder does not exist!")
-            return False
+        # Check folder/S3 path validity
+        input_path = self.folder_entry.get()
+        if input_path.startswith('s3://'):
+            # S3 path validation
+            if not S3_AVAILABLE:
+                messagebox.showerror("Error", "S3 support is not available!")
+                return False
+            if not self.s3_handler:
+                messagebox.showerror("Error", "S3 is not configured! Please click 'S3 Config' first.")
+                return False
+            # Basic S3 path validation
+            if len(input_path) <= 5 or '/' not in input_path[5:]:
+                messagebox.showerror("Error", "Invalid S3 path! Format: s3://bucket/folder")
+                return False
+        else:
+            # Local path validation
+            if not os.path.exists(input_path):
+                messagebox.showerror("Error", "Selected folder does not exist!")
+                return False
+                
+        # Validate output path if using S3
+        output_path = self.save_entry.get()
+        if output_path.startswith('s3://'):
+            if not S3_AVAILABLE:
+                messagebox.showerror("Error", "S3 support is not available!")
+                return False
+            if not self.s3_handler:
+                messagebox.showerror("Error", "S3 is not configured! Please click 'S3 Config' first.")
+                return False
+            # Basic S3 output path validation
+            if len(output_path) <= 5:
+                messagebox.showerror("Error", "Invalid S3 output path!")
+                return False
 
         # Add threshold validation
         threshold = self.threshold.get()
@@ -3065,6 +3270,136 @@ class DocumentAnalyzerGUI:
                 self.save_entry.insert(0, file_path)
         except Exception as e:
             messagebox.showerror("Error", f"Error selecting save location: {str(e)}")
+    
+    # S3-related methods
+    def initialize_s3(self):
+        """Initialize S3 components"""
+        try:
+            # Try to create S3 handler with default config
+            self.s3_config = S3Config()
+            self.s3_handler = S3FileHandler(self.s3_config)
+            
+            # Don't verify credentials here - do it when needed
+            self.log_message("S3 support available")
+        except Exception as e:
+            self.log_message(f"S3 initialization deferred: {str(e)}")
+            self.s3_handler = None
+    
+    def configure_s3(self):
+        """Open S3 configuration dialog"""
+        if not S3_AVAILABLE:
+            messagebox.showwarning("S3 Not Available", 
+                                 "S3 support is not available. Please install boto3.")
+            return
+            
+        dialog = S3ConfigDialog(self.root, self.s3_config)
+        self.root.wait_window(dialog)
+        
+        if dialog.result:
+            self.s3_config = dialog.result
+            try:
+                self.s3_handler = S3FileHandler(self.s3_config)
+                self.s3_processor = create_s3_processor(self.s3_config)
+                if self.s3_processor:
+                    self.log_message("S3 configuration updated successfully")
+                else:
+                    self.log_message("S3 configuration saved but credentials not verified")
+            except Exception as e:
+                self.log_message(f"Error updating S3 configuration: {str(e)}")
+                messagebox.showerror("S3 Error", f"Failed to configure S3: {str(e)}")
+    
+    def update_input_widgets(self):
+        """Update input widgets based on selected source"""
+        if self.input_source.get() == "s3":
+            self.input_label.config(text="S3 Path:")
+            self.folder_entry.delete(0, tk.END)
+            self.folder_entry.insert(0, "s3://")
+        else:
+            self.input_label.config(text="Input Folder:")
+            self.folder_entry.delete(0, tk.END)
+            
+        # Update file count
+        self.update_file_count(trigger="source_change")
+    
+    def update_output_widgets(self):
+        """Update output widgets based on selected destination"""
+        if self.output_destination.get() == "s3":
+            self.output_label.config(text="S3 Path:")
+            self.save_entry.delete(0, tk.END)
+            self.save_entry.insert(0, "s3://")
+        else:
+            self.output_label.config(text="Save Location:")
+            self.save_entry.delete(0, tk.END)
+    
+    def browse_input(self):
+        """Browse for input location based on source type"""
+        if self.input_source.get() == "s3":
+            self.browse_s3_input()
+        else:
+            self.browse_folder()
+    
+    def browse_output(self):
+        """Browse for output location based on destination type"""
+        if self.output_destination.get() == "s3":
+            self.browse_s3_output()
+        else:
+            self.browse_save_location()
+    
+    def browse_s3_input(self):
+        """Browse S3 for input folder"""
+        if not self.s3_handler:
+            messagebox.showwarning("S3 Not Configured", 
+                                 "Please configure S3 settings first.")
+            return
+            
+        # Verify credentials
+        success, error = self.s3_handler.verify_credentials()
+        if not success:
+            messagebox.showerror("S3 Error", f"S3 credentials error: {error}")
+            return
+            
+        dialog = S3BrowserDialog(self.root, self.s3_handler, self.folder_entry.get())
+        self.root.wait_window(dialog)
+        
+        if dialog.result:
+            self.folder_entry.delete(0, tk.END)
+            self.folder_entry.insert(0, dialog.result)
+            self.update_file_count(trigger="browse")
+    
+    def browse_s3_output(self):
+        """Browse S3 for output location"""
+        if not self.s3_handler:
+            messagebox.showwarning("S3 Not Configured", 
+                                 "Please configure S3 settings first.")
+            return
+            
+        # Verify credentials
+        success, error = self.s3_handler.verify_credentials()
+        if not success:
+            messagebox.showerror("S3 Error", f"S3 credentials error: {error}")
+            return
+            
+        dialog = S3BrowserDialog(self.root, self.s3_handler, self.save_entry.get())
+        self.root.wait_window(dialog)
+        
+        if dialog.result:
+            # Add filename to path
+            filename = filedialog.asksaveasfilename(
+                defaultextension=".csv",
+                filetypes=[
+                    ("CSV files", "*.csv"),
+                    ("Parquet files", "*.parquet"),
+                    ("SQLite databases", "*.db")
+                ],
+                title="Enter filename for S3"
+            )
+            if filename:
+                base_name = os.path.basename(filename)
+                s3_path = dialog.result
+                if not s3_path.endswith('/'):
+                    s3_path += '/'
+                self.save_entry.delete(0, tk.END)
+                self.save_entry.insert(0, s3_path + base_name)
 
     def toggle_pause(self) -> None:
         """Toggle pause state of analysis and update timing"""

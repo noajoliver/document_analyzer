@@ -6,6 +6,10 @@ An application for analyzing PDF documents and images (including multi-page TIFF
 - Analyzes PDFs and images including multi-page TIFF files
   * Each page in multi-page TIFFs is analyzed separately
   * Supports both .tif and .tiff extensions
+- AWS S3 integration for cloud-based workflows
+  * Process files directly from S3 buckets
+  * Upload results back to S3
+  * Batch download optimization
 - Configurable margin detection threshold (0.1-10.0%)
   * Default 1.0% threshold for standard detection
   * Fine control with 0.1% increments

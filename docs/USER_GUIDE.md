@@ -796,6 +796,73 @@ The application includes detailed error tracking:
    - Review the log for any warnings
    - Check a few results manually to confirm accuracy
 
+## AWS S3 Support
+
+### Overview
+The Document Margin Analyzer supports processing files directly from Amazon S3 buckets and uploading results back to S3. This enables cloud-based workflows without downloading large datasets locally.
+
+### S3 Prerequisites
+1. **AWS Account**: You need an active AWS account
+2. **AWS Credentials**: Configure using one of these methods:
+   - AWS CLI: `aws configure`
+   - Environment variables: `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`
+   - IAM roles (for EC2 instances)
+3. **Permissions**: Your AWS credentials need:
+   - `s3:ListBucket` for browsing buckets
+   - `s3:GetObject` for downloading files
+   - `s3:PutObject` for uploading results
+
+### Configuring S3 Access
+1. Click the **"S3 Config"** button in the main window
+2. In the configuration dialog:
+   - **AWS Profile**: Select your AWS profile (or use 'default')
+   - **AWS Region**: Choose your preferred region
+   - **Max Concurrent Downloads**: Set parallel download limit (1-20)
+3. Click **"Test Connection"** to verify credentials
+4. Click **"OK"** to save configuration
+
+### Using S3 for Input Files
+1. Select **"S3 Bucket"** radio button under Input Source
+2. Click **"Browse"** to open the S3 browser
+3. Navigate through your buckets and folders:
+   - Select a bucket from the dropdown
+   - Double-click folders to navigate
+   - Click **"Select Folder"** when ready
+4. The S3 path will appear as: `s3://bucket-name/folder/path/`
+
+### Using S3 for Output Files
+1. Select **"S3 Bucket"** radio button under Output Destination
+2. Click **"Browse"** to select S3 location
+3. Choose the destination folder
+4. Enter a filename when prompted
+5. The S3 path will appear as: `s3://bucket-name/folder/output.csv`
+
+### S3 Processing Workflow
+1. **File Discovery**: Lists all matching files in the S3 path
+2. **Sampling**: Applies sampling rules (if enabled) to S3 file list
+3. **Batch Download**: Downloads files in batches for processing
+4. **Local Processing**: Analyzes files using temporary local cache
+5. **Result Upload**: Automatically uploads results to S3 when complete
+6. **Cleanup**: Removes temporary files after processing
+
+### S3 Performance Tips
+- **Batch Size**: Files are downloaded in batches to optimize performance
+- **Parallel Downloads**: Adjust max concurrent downloads based on bandwidth
+- **Large Datasets**: Use sampling for initial testing before full runs
+- **Network**: Ensure stable internet connection for S3 operations
+
+### S3 Limitations
+- **Authentication**: Only supports standard AWS credential methods
+- **Streaming**: Files must be downloaded before processing (no streaming)
+- **Costs**: Standard AWS S3 charges apply for data transfer and storage
+
+### Troubleshooting S3 Issues
+1. **"S3 not configured"**: Click S3 Config and set up credentials
+2. **"No credentials found"**: Ensure AWS credentials are properly configured
+3. **"Access Denied"**: Check S3 bucket permissions for your AWS user
+4. **"Connection timeout"**: Verify internet connection and AWS region
+5. **"Invalid S3 path"**: Use format `s3://bucket-name/folder/`
+
 ## About
 © 2024 Noa J Oliver
 This program is free software under the GNU General Public License v3.0.
